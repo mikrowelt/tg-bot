@@ -1,0 +1,8 @@
+profiles
+work_profiles
+.env
+!.env.example
+.venv
+logs.txt
+unknown_errors.txt
+avatar.jpg
