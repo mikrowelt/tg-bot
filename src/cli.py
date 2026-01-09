@@ -3,6 +3,7 @@
 Telegram Bot CLI
 
 Usage:
+    tg-bot health-check [options]
     tg-bot change-profile [options]
     tg-bot join-channel <channel> [options]
     tg-bot send-message <target> <text> [options]
@@ -14,7 +15,7 @@ import asyncio
 import os
 import sys
 
-from .commands import change_profile, join_channel, send_message
+from .commands import change_profile, health_check, join_channel, send_message
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -28,6 +29,12 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # health-check command
+    subparsers.add_parser(
+        "health-check",
+        help="Check if the client is healthy and ready to send messages",
+    )
 
     # change-profile command
     profile_parser = subparsers.add_parser(
@@ -155,7 +162,11 @@ def main() -> None:
     parser = create_parser()
     args = parser.parse_args()
 
-    if args.command == "change-profile":
+    if args.command == "health-check":
+        result = health_check(profile=args.profile)
+        sys.exit(0 if result and result.get("ok") else 1)
+
+    elif args.command == "change-profile":
         # Check if at least one option is provided
         if not any([args.first_name, args.last_name, args.about, args.username, args.photo]):
             print("Error: At least one profile option is required", file=sys.stderr)
@@ -179,13 +190,14 @@ def main() -> None:
         )
 
     elif args.command == "send-message":
-        send_message(
+        result = send_message(
             target=args.target,
             text=args.text,
             profile=args.profile,
             comment_to=args.comment_to,
             reply_to=args.reply_to,
         )
+        sys.exit(0 if result and result.ok else 1)
 
     elif args.command == "worker":
         from .worker import run_dispatcher, discover_profiles

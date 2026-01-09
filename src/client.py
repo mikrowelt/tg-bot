@@ -1,10 +1,17 @@
 import random
 import asyncio
+from dataclasses import dataclass
 from telethon import TelegramClient, functions
 from telethon.errors import (
     SessionPasswordNeededError,
     UserAlreadyParticipantError,
     FloodWaitError,
+    ChatWriteForbiddenError,
+    UserBannedInChannelError,
+    ChannelPrivateError,
+    ChatRestrictedError,
+    SlowModeWaitError,
+    ForbiddenError,
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
@@ -34,6 +41,16 @@ class SendMessageError(TgBotError):
 class ProfileUpdateError(TgBotError):
     """Raised when profile update fails."""
     pass
+
+
+@dataclass
+class SendResult:
+    """Result of a send message operation."""
+    ok: bool
+    message_id: int | None = None
+    error: str | None = None
+    retryable: bool = True
+    wait_seconds: int | None = None
 
 
 class TgBot:
@@ -114,6 +131,69 @@ class TgBot:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.disconnect()
 
+    # ============ HEALTH CHECK ============
+
+    async def health_check(self) -> dict:
+        """
+        Check if the client is healthy and ready to send messages.
+
+        Returns a dict with:
+            - ok: bool - True if all checks pass
+            - connected: bool - TCP connection status
+            - authorized: bool - User authorization status
+            - user_id: int | None - Current user ID
+            - username: str | None - Current username
+            - restricted: bool - Whether account has restrictions
+            - error: str | None - Error message if any check fails
+        """
+        result = {
+            "ok": False,
+            "connected": False,
+            "authorized": False,
+            "user_id": None,
+            "username": None,
+            "restricted": False,
+            "error": None,
+        }
+
+        try:
+            # Check if client exists
+            if self._client is None:
+                result["error"] = "Client not initialized"
+                return result
+
+            # Check connection
+            if not self._client.is_connected():
+                result["error"] = "Client not connected"
+                return result
+            result["connected"] = True
+
+            # Check authorization
+            if not await self._client.is_user_authorized():
+                result["error"] = "User not authorized"
+                return result
+            result["authorized"] = True
+
+            # Get user info
+            me = await self._client.get_me()
+            result["user_id"] = me.id
+            result["username"] = me.username
+
+            # Check for restrictions
+            if me.restricted:
+                result["restricted"] = True
+                result["error"] = "Account is restricted"
+                return result
+
+            result["ok"] = True
+            log.debug(f"Health check passed for user {me.id}")
+
+        except Exception as e:
+            result["error"] = str(e)
+            log.warning(f"Health check failed: {e}")
+
+        return result
+
     # ============ CHANNEL OPERATIONS ============
 
     async def join_channel(self, channel_link: str, verify: bool = True) -> int:
@@ -193,12 +273,17 @@ class TgBot:
         target: int | str,
         text: str,
         reply_to: int | None = None,
-    ) -> int:
+    ) -> SendResult:
         """
         Send a message to a chat, channel, or user.
-        Can also reply to a specific message (for channel comments).
-        Raises SendMessageError on failure.
-        Returns the message ID of the sent message.
+        Can also reply to a specific message.
+
+        Returns SendResult with:
+            - ok: True if message was sent
+            - message_id: ID of sent message (if ok)
+            - error: Error message (if not ok)
+            - retryable: False for permanent errors (banned, no permissions)
+            - wait_seconds: Seconds to wait before retry (for rate limits)
         """
         log.info(f"Sending message to: {target}")
         log.debug(f"Message text: {text[:50]}{'...' if len(text) > 50 else ''}")
@@ -206,32 +291,105 @@ class TgBot:
             await asyncio.sleep(random.uniform(1, 3))
             msg = await self.client.send_message(target, text, reply_to=reply_to)
             log.info(f"Message sent successfully (id={msg.id})")
-            return msg.id
+            return SendResult(ok=True, message_id=msg.id)
+
+        except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
+            log.error(f"Banned or no write permission: {e}")
+            return SendResult(
+                ok=False,
+                error="banned",
+                retryable=False,
+            )
+
+        except ChannelPrivateError as e:
+            log.error(f"Channel is private or deleted: {e}")
+            return SendResult(
+                ok=False,
+                error="channel_private",
+                retryable=False,
+            )
+
+        except ChatRestrictedError as e:
+            log.error(f"Chat is restricted: {e}")
+            return SendResult(
+                ok=False,
+                error="chat_restricted",
+                retryable=False,
+            )
+
+        except ForbiddenError as e:
+            log.error(f"Forbidden: {e}")
+            return SendResult(
+                ok=False,
+                error="forbidden",
+                retryable=False,
+            )
+
         except FloodWaitError as e:
-            log.error(f"Rate limited for {e.seconds}s")
-            raise SendMessageError(f"Rate limited: wait {e.seconds} seconds")
+            log.warning(f"Rate limited for {e.seconds}s")
+            return SendResult(
+                ok=False,
+                error="flood_wait",
+                retryable=True,
+                wait_seconds=e.seconds,
+            )
+
+        except SlowModeWaitError as e:
+            log.warning(f"Slow mode: wait {e.seconds}s")
+            return SendResult(
+                ok=False,
+                error="slow_mode",
+                retryable=True,
+                wait_seconds=e.seconds,
+            )
+
         except Exception as e:
             log.error(f"Send failed: {e}")
-            raise SendMessageError(f"Failed to send message: {e}")
+            return SendResult(
+                ok=False,
+                error=str(e),
+                retryable=True,
+            )
 
-    async def send_comment(self, channel: int | str, post_id: int, text: str) -> int:
+    async def send_comment(self, channel: int | str, post_id: int, text: str) -> SendResult:
         """
         Send a comment to a channel post.
-        Raises SendMessageError on failure.
-        Returns the message ID of the sent comment.
+        Returns SendResult (same as send_message).
         """
         log.info(f"Sending comment to post {post_id} in {channel}")
         try:
             await asyncio.sleep(random.uniform(1, 3))
             msg = await self.client.send_message(channel, text, comment_to=post_id)
             log.info(f"Comment sent successfully (id={msg.id})")
-            return msg.id
+            return SendResult(ok=True, message_id=msg.id)
+
+        except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
+            log.error(f"Banned or no write permission: {e}")
+            return SendResult(ok=False, error="banned", retryable=False)
+
+        except ChannelPrivateError as e:
+            log.error(f"Channel is private or deleted: {e}")
+            return SendResult(ok=False, error="channel_private", retryable=False)
+
+        except ChatRestrictedError as e:
+            log.error(f"Chat is restricted: {e}")
+            return SendResult(ok=False, error="chat_restricted", retryable=False)
+
+        except ForbiddenError as e:
+            log.error(f"Forbidden: {e}")
+            return SendResult(ok=False, error="forbidden", retryable=False)
+
         except FloodWaitError as e:
-            log.error(f"Rate limited for {e.seconds}s")
-            raise SendMessageError(f"Rate limited: wait {e.seconds} seconds")
+            log.warning(f"Rate limited for {e.seconds}s")
+            return SendResult(ok=False, error="flood_wait", retryable=True, wait_seconds=e.seconds)
+
+        except SlowModeWaitError as e:
+            log.warning(f"Slow mode: wait {e.seconds}s")
+            return SendResult(ok=False, error="slow_mode", retryable=True, wait_seconds=e.seconds)
+
         except Exception as e:
             log.error(f"Comment failed: {e}")
-            raise SendMessageError(f"Failed to send comment: {e}")
+            return SendResult(ok=False, error=str(e), retryable=True)
 
     # ============ PROFILE OPERATIONS ============
 

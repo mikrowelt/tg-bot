@@ -1,9 +1,11 @@
 import asyncio
+import json
 import sys
+from dataclasses import asdict
 
 from ..utils.config import Config, ConfigError
 from ..utils.logger import setup_logger
-from ..client import TgBot, SendMessageError
+from ..client import TgBot, SendResult
 
 log = setup_logger("tg-bot.cmd.message")
 
@@ -14,8 +16,8 @@ async def _send_message(
     profile: str | None,
     comment_to: int | None,
     reply_to: int | None,
-) -> int:
-    """Internal async implementation. Returns the message ID."""
+) -> SendResult:
+    """Internal async implementation. Returns SendResult."""
     config = Config.load(profile)
 
     # Parse target - could be @username, channel ID, or link
@@ -44,7 +46,7 @@ def send_message(
     profile: str | None = None,
     comment_to: int | None = None,
     reply_to: int | None = None,
-) -> int | None:
+) -> SendResult | None:
     """
     Send a message to a group, channel, or user.
 
@@ -56,24 +58,27 @@ def send_message(
         reply_to: Message ID to reply to
 
     Returns:
-        The message ID of the sent message, or None on error.
+        SendResult with ok, message_id, error, retryable, wait_seconds
     """
     try:
-        message_id = asyncio.run(_send_message(
+        result = asyncio.run(_send_message(
             target=target,
             text=text,
             profile=profile,
             comment_to=comment_to,
             reply_to=reply_to,
         ))
-        log.info("Send message completed successfully")
-        print(message_id)
-        return message_id
+        print(json.dumps(asdict(result)))
+
+        if result.ok:
+            log.info(f"Message sent (id={result.message_id})")
+        else:
+            log.warning(f"Send failed: {result.error} (retryable={result.retryable})")
+
+        return result
+
     except ConfigError as e:
         log.error(f"Configuration error: {e}")
-        sys.exit(1)
-    except SendMessageError as e:
-        log.error(f"Send message failed: {e}")
         sys.exit(1)
     except Exception as e:
         log.error(f"Unexpected error: {e}")

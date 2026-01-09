@@ -1,6 +1,7 @@
+from dataclasses import asdict
 from typing import Any
 
-from ..client import TgBot, JoinChannelError, SendMessageError, ProfileUpdateError
+from ..client import TgBot, JoinChannelError, ProfileUpdateError
 from ..utils.logger import setup_logger
 from .task import Task, TaskResult, Command
 
@@ -24,7 +25,7 @@ async def handle_join_channel(bot: TgBot, args: dict[str, Any]) -> dict[str, Any
 
 
 async def handle_send_message(bot: TgBot, args: dict[str, Any]) -> dict[str, Any]:
-    """Handle send_message command."""
+    """Handle send_message command. Returns SendResult as dict."""
     target = args.get("target")
     text = args.get("text")
 
@@ -37,11 +38,11 @@ async def handle_send_message(bot: TgBot, args: dict[str, Any]) -> dict[str, Any
     reply_to = args.get("reply_to")
 
     if comment_to:
-        await bot.send_comment(target, comment_to, text)
+        result = await bot.send_comment(target, comment_to, text)
     else:
-        await bot.send_message(target, text, reply_to=reply_to)
+        result = await bot.send_message(target, text, reply_to=reply_to)
 
-    return {"success": True}
+    return asdict(result)
 
 
 async def handle_change_profile(bot: TgBot, args: dict[str, Any]) -> dict[str, Any]:
@@ -103,10 +104,6 @@ async def execute_task(bot: TgBot, task: Task) -> TaskResult:
     except JoinChannelError as e:
         log.error(f"Task {task.task_id} join channel error: {e}")
         return TaskResult.failure(task.task_id, str(e), "JoinChannelError")
-
-    except SendMessageError as e:
-        log.error(f"Task {task.task_id} send message error: {e}")
-        return TaskResult.failure(task.task_id, str(e), "SendMessageError")
 
     except ProfileUpdateError as e:
         log.error(f"Task {task.task_id} profile update error: {e}")
