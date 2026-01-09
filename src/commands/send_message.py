@@ -14,8 +14,8 @@ async def _send_message(
     profile: str | None,
     comment_to: int | None,
     reply_to: int | None,
-) -> None:
-    """Internal async implementation."""
+) -> int:
+    """Internal async implementation. Returns the message ID."""
     config = Config.load(profile)
 
     # Parse target - could be @username, channel ID, or link
@@ -33,9 +33,9 @@ async def _send_message(
 
     async with TgBot(config) as bot:
         if comment_to:
-            await bot.send_comment(parsed_target, comment_to, text)
+            return await bot.send_comment(parsed_target, comment_to, text)
         else:
-            await bot.send_message(parsed_target, text, reply_to=reply_to)
+            return await bot.send_message(parsed_target, text, reply_to=reply_to)
 
 
 def send_message(
@@ -44,7 +44,7 @@ def send_message(
     profile: str | None = None,
     comment_to: int | None = None,
     reply_to: int | None = None,
-) -> None:
+) -> int | None:
     """
     Send a message to a group, channel, or user.
 
@@ -54,9 +54,12 @@ def send_message(
         profile: Profile name (defaults to PROFILE_NAME env var or "profile")
         comment_to: Post ID to comment on (for channel comments)
         reply_to: Message ID to reply to
+
+    Returns:
+        The message ID of the sent message, or None on error.
     """
     try:
-        asyncio.run(_send_message(
+        message_id = asyncio.run(_send_message(
             target=target,
             text=text,
             profile=profile,
@@ -64,6 +67,8 @@ def send_message(
             reply_to=reply_to,
         ))
         log.info("Send message completed successfully")
+        print(message_id)
+        return message_id
     except ConfigError as e:
         log.error(f"Configuration error: {e}")
         sys.exit(1)

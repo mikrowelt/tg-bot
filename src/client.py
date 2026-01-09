@@ -193,18 +193,20 @@ class TgBot:
         target: int | str,
         text: str,
         reply_to: int | None = None,
-    ) -> None:
+    ) -> int:
         """
         Send a message to a chat, channel, or user.
         Can also reply to a specific message (for channel comments).
         Raises SendMessageError on failure.
+        Returns the message ID of the sent message.
         """
         log.info(f"Sending message to: {target}")
         log.debug(f"Message text: {text[:50]}{'...' if len(text) > 50 else ''}")
         try:
             await asyncio.sleep(random.uniform(1, 3))
-            await self.client.send_message(target, text, reply_to=reply_to)
-            log.info("Message sent successfully")
+            msg = await self.client.send_message(target, text, reply_to=reply_to)
+            log.info(f"Message sent successfully (id={msg.id})")
+            return msg.id
         except FloodWaitError as e:
             log.error(f"Rate limited for {e.seconds}s")
             raise SendMessageError(f"Rate limited: wait {e.seconds} seconds")
@@ -212,16 +214,18 @@ class TgBot:
             log.error(f"Send failed: {e}")
             raise SendMessageError(f"Failed to send message: {e}")
 
-    async def send_comment(self, channel: int | str, post_id: int, text: str) -> None:
+    async def send_comment(self, channel: int | str, post_id: int, text: str) -> int:
         """
         Send a comment to a channel post.
         Raises SendMessageError on failure.
+        Returns the message ID of the sent comment.
         """
         log.info(f"Sending comment to post {post_id} in {channel}")
         try:
             await asyncio.sleep(random.uniform(1, 3))
-            await self.client.send_message(channel, text, comment_to=post_id)
-            log.info("Comment sent successfully")
+            msg = await self.client.send_message(channel, text, comment_to=post_id)
+            log.info(f"Comment sent successfully (id={msg.id})")
+            return msg.id
         except FloodWaitError as e:
             log.error(f"Rate limited for {e.seconds}s")
             raise SendMessageError(f"Rate limited: wait {e.seconds} seconds")

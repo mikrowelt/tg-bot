@@ -6,8 +6,12 @@ Usage:
     tg-bot change-profile [options]
     tg-bot join-channel <channel> [options]
     tg-bot send-message <target> <text> [options]
+    tg-bot worker --profiles <profiles> [options]
+    tg-bot run-task --profile <profile> [options]
 """
 import argparse
+import asyncio
+import os
 import sys
 
 from .commands import change_profile, join_channel, send_message
@@ -90,6 +94,60 @@ def create_parser() -> argparse.ArgumentParser:
         help="Message ID to reply to",
     )
 
+    # worker command (dispatcher)
+    worker_parser = subparsers.add_parser(
+        "worker",
+        help="Run dispatcher to watch Redis and spawn workers on-demand",
+    )
+    worker_parser.add_argument(
+        "--profiles",
+        help="Comma-separated list of profile names to handle",
+    )
+    worker_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Handle all profiles found in BASE_DIR",
+    )
+    worker_parser.add_argument(
+        "--redis",
+        default=os.getenv("REDIS_URL", "redis://localhost:6379"),
+        help="Redis URL (default: REDIS_URL env var or redis://localhost:6379)",
+    )
+    worker_parser.add_argument(
+        "--result-ttl",
+        type=int,
+        default=int(os.getenv("RESULT_TTL", "300")),
+        help="Seconds to keep results in Redis (default: 300)",
+    )
+
+    # run-task command (single task executor, used by dispatcher)
+    task_parser = subparsers.add_parser(
+        "run-task",
+        help="Execute a single task from Redis queue (internal use)",
+    )
+    task_parser.add_argument(
+        "--profile",
+        required=True,
+        help="Profile name to use",
+    )
+    task_parser.add_argument(
+        "--redis",
+        default=os.getenv("REDIS_URL", "redis://localhost:6379"),
+        help="Redis URL",
+    )
+    task_parser.add_argument(
+        "--result-ttl",
+        type=int,
+        default=int(os.getenv("RESULT_TTL", "300")),
+        help="Seconds to keep results in Redis",
+    )
+    task_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=5,
+        help="Seconds to wait for a task (default: 5)",
+    )
+
     return parser
 
 
@@ -128,6 +186,45 @@ def main() -> None:
             comment_to=args.comment_to,
             reply_to=args.reply_to,
         )
+
+    elif args.command == "worker":
+        from .worker import run_dispatcher, discover_profiles
+
+        # Determine profiles to handle
+        if args.all:
+            profiles = discover_profiles()
+            if not profiles:
+                print("Error: No profiles found in BASE_DIR", file=sys.stderr)
+                sys.exit(1)
+        elif args.profiles:
+            profiles = [p.strip() for p in args.profiles.split(",")]
+        else:
+            print("Error: Either --profiles or --all is required", file=sys.stderr)
+            parser.parse_args(["worker", "--help"])
+            sys.exit(1)
+
+        try:
+            asyncio.run(run_dispatcher(
+                profiles=profiles,
+                redis_url=args.redis,
+                result_ttl=args.result_ttl,
+            ))
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "run-task":
+        from .worker import run_task_sync
+
+        exit_code = run_task_sync(
+            profile=args.profile,
+            redis_url=args.redis,
+            result_ttl=args.result_ttl,
+            timeout=args.timeout,
+        )
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
