@@ -8,6 +8,8 @@ class Command(str, Enum):
     JOIN_CHANNEL = "join_channel"
     SEND_MESSAGE = "send_message"
     CHANGE_PROFILE = "change_profile"
+    GET_PROFILE = "get_profile"
+    PROFILE_HEALTH_CHECK = "profile_health_check"
 
 
 class TaskStatus(str, Enum):

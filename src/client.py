@@ -15,6 +15,7 @@ from telethon.errors import (
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
+from telethon.tl.functions.users import GetFullUserRequest
 
 from .utils.config import Config
 from .utils.logger import setup_logger
@@ -402,18 +403,38 @@ class TgBot:
         photo_path: str | None = None,
     ) -> None:
         """
-        Update profile information.
-        Raises ProfileUpdateError on failure.
+        Update profile information. Supports partial updates - only provided
+        fields will be changed, existing values are preserved.
+
+        Args:
+            first_name: New first name (None to keep current)
+            last_name: New last name (None to keep current, "" to clear)
+            about: New bio/about text (None to keep current, "" to clear)
+            username: New username without @ (None to keep current)
+            photo_path: Path to new profile photo
+
+        Raises:
+            ProfileUpdateError: If update fails
         """
         log.info("Updating profile...")
         try:
-            # Update name and bio
-            if first_name or last_name or about:
-                log.debug(f"Setting name: {first_name} {last_name}")
+            # Update name and bio (with partial update support)
+            if first_name is not None or last_name is not None or about is not None:
+                # Fetch current profile to preserve unchanged fields
+                me = await self.client.get_me()
+                full_user = await self.client(GetFullUserRequest(me.id))
+                current_about = full_user.full_user.about or ""
+
+                # Use provided values or keep current
+                new_first_name = first_name if first_name is not None else me.first_name
+                new_last_name = last_name if last_name is not None else (me.last_name or "")
+                new_about = about if about is not None else current_about
+
+                log.debug(f"Setting name: {new_first_name} {new_last_name}")
                 await self.client(UpdateProfileRequest(
-                    first_name=first_name or "",
-                    last_name=last_name or "",
-                    about=about or "",
+                    first_name=new_first_name,
+                    last_name=new_last_name,
+                    about=new_about,
                 ))
                 log.info("Profile name/bio updated")
                 await asyncio.sleep(random.uniform(3, 7))
@@ -428,7 +449,7 @@ class TgBot:
                 await asyncio.sleep(random.uniform(3, 7))
 
             # Update username
-            if username:
+            if username is not None:
                 log.debug(f"Setting username: @{username}")
                 await self.client(UpdateUsernameRequest(username=username))
                 log.info(f"Username set to @{username}")
@@ -441,6 +462,206 @@ class TgBot:
             raise ProfileUpdateError(f"Failed to update profile: {e}")
 
     async def get_profile(self) -> dict:
-        """Get current user profile information."""
+        """
+        Get current profile information from Telegram.
+
+        Returns:
+            {
+                "user_id": int,
+                "first_name": str,
+                "last_name": str | None,
+                "username": str | None,
+                "about": str | None,
+                "phone": str,
+                "photo": bytes | None,  # Profile photo as bytes, or None if no photo
+            }
+        """
+        log.info("Fetching profile information...")
+
+        # Get basic user info
         me = await self.client.get_me()
-        return me.to_dict()
+
+        # Get full user info (includes about/bio)
+        full_user = await self.client(GetFullUserRequest(me.id))
+        about = full_user.full_user.about
+
+        # Download profile photo as bytes if exists
+        photo_bytes = None
+        if me.photo:
+            log.debug("Downloading profile photo...")
+            photo_bytes = await self.client.download_profile_photo(
+                me, file=bytes
+            )
+
+        result = {
+            "user_id": me.id,
+            "first_name": me.first_name,
+            "last_name": me.last_name,
+            "username": me.username,
+            "about": about,
+            "phone": me.phone,
+            "photo": photo_bytes,
+        }
+
+        log.info(f"Profile fetched for user {me.id} (@{me.username or 'no username'})")
+        return result
+
+    async def profile_health_check(
+        self,
+        expected_first_name: str | None = None,
+        expected_last_name: str | None = None,
+        expected_username: str | None = None,
+        expected_about: str | None = None,
+    ) -> dict:
+        """
+        Comprehensive profile health check.
+
+        Checks:
+        - Account is not frozen/blocked/restricted
+        - Profile data matches expected values (if provided)
+
+        Args:
+            expected_first_name: Expected first name to verify against
+            expected_last_name: Expected last name to verify against
+            expected_username: Expected username to verify against
+            expected_about: Expected bio/about to verify against
+
+        Returns:
+            {
+                "ok": bool,  # True if all checks pass
+                "account_status": {
+                    "authorized": bool,
+                    "restricted": bool,
+                    "restriction_reason": str | None,
+                    "deleted": bool,
+                    "fake": bool,
+                    "scam": bool,
+                },
+                "profile": {
+                    "user_id": int,
+                    "first_name": str,
+                    "last_name": str | None,
+                    "username": str | None,
+                    "about": str | None,
+                    "has_photo": bool,
+                },
+                "sync_status": {
+                    "in_sync": bool,  # True if all expected values match
+                    "mismatches": [{"field": str, "expected": str, "actual": str}, ...]
+                },
+                "errors": [str, ...]  # List of issues found
+            }
+        """
+        log.info("Running profile health check...")
+
+        result = {
+            "ok": False,
+            "account_status": {
+                "authorized": False,
+                "restricted": False,
+                "restriction_reason": None,
+                "deleted": False,
+                "fake": False,
+                "scam": False,
+            },
+            "profile": {
+                "user_id": None,
+                "first_name": None,
+                "last_name": None,
+                "username": None,
+                "about": None,
+                "has_photo": False,
+            },
+            "sync_status": {
+                "in_sync": True,
+                "mismatches": [],
+            },
+            "errors": [],
+        }
+
+        try:
+            # Check authorization
+            if not await self.client.is_user_authorized():
+                result["errors"].append("Account not authorized")
+                return result
+            result["account_status"]["authorized"] = True
+
+            # Get user info
+            me = await self.client.get_me()
+            result["profile"]["user_id"] = me.id
+
+            # Check account flags
+            if me.restricted:
+                result["account_status"]["restricted"] = True
+                if me.restriction_reason:
+                    result["account_status"]["restriction_reason"] = me.restriction_reason
+                result["errors"].append(f"Account is restricted: {me.restriction_reason or 'unknown reason'}")
+
+            if me.deleted:
+                result["account_status"]["deleted"] = True
+                result["errors"].append("Account is deleted")
+
+            if me.fake:
+                result["account_status"]["fake"] = True
+                result["errors"].append("Account is marked as fake")
+
+            if me.scam:
+                result["account_status"]["scam"] = True
+                result["errors"].append("Account is marked as scam")
+
+            # Get full profile info
+            full_user = await self.client(GetFullUserRequest(me.id))
+            about = full_user.full_user.about
+
+            result["profile"]["first_name"] = me.first_name
+            result["profile"]["last_name"] = me.last_name
+            result["profile"]["username"] = me.username
+            result["profile"]["about"] = about
+            result["profile"]["has_photo"] = me.photo is not None
+
+            # Check sync status if expected values provided
+            mismatches = []
+
+            if expected_first_name is not None and me.first_name != expected_first_name:
+                mismatches.append({
+                    "field": "first_name",
+                    "expected": expected_first_name,
+                    "actual": me.first_name,
+                })
+
+            if expected_last_name is not None and (me.last_name or "") != (expected_last_name or ""):
+                mismatches.append({
+                    "field": "last_name",
+                    "expected": expected_last_name,
+                    "actual": me.last_name,
+                })
+
+            if expected_username is not None and (me.username or "") != (expected_username or ""):
+                mismatches.append({
+                    "field": "username",
+                    "expected": expected_username,
+                    "actual": me.username,
+                })
+
+            if expected_about is not None and (about or "") != (expected_about or ""):
+                mismatches.append({
+                    "field": "about",
+                    "expected": expected_about,
+                    "actual": about,
+                })
+
+            if mismatches:
+                result["sync_status"]["in_sync"] = False
+                result["sync_status"]["mismatches"] = mismatches
+                result["errors"].append(f"Profile out of sync: {len(mismatches)} field(s) mismatch")
+
+            # Overall status
+            result["ok"] = len(result["errors"]) == 0
+
+            log.info(f"Profile health check: {'OK' if result['ok'] else 'ISSUES FOUND'}")
+
+        except Exception as e:
+            log.error(f"Profile health check failed: {e}")
+            result["errors"].append(f"Check failed: {e}")
+
+        return result

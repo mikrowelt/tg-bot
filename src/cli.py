@@ -4,6 +4,8 @@ Telegram Bot CLI
 
 Usage:
     tg-bot health-check [options]
+    tg-bot get-profile [options]
+    tg-bot profile-health-check [options]
     tg-bot change-profile [options]
     tg-bot join-channel <channel> [options]
     tg-bot send-message <target> <text> [options]
@@ -15,7 +17,14 @@ import asyncio
 import os
 import sys
 
-from .commands import change_profile, health_check, join_channel, send_message
+from .commands import (
+    change_profile,
+    get_profile,
+    health_check,
+    join_channel,
+    profile_health_check,
+    send_message,
+)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -34,6 +43,39 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "health-check",
         help="Check if the client is healthy and ready to send messages",
+    )
+
+    # get-profile command
+    get_profile_parser = subparsers.add_parser(
+        "get-profile",
+        help="Get current Telegram profile information",
+    )
+    get_profile_parser.add_argument(
+        "--include-photo",
+        action="store_true",
+        help="Include base64-encoded profile photo in response",
+    )
+
+    # profile-health-check command
+    profile_health_parser = subparsers.add_parser(
+        "profile-health-check",
+        help="Check if profile is healthy and in sync with expected values",
+    )
+    profile_health_parser.add_argument(
+        "--expected-first-name",
+        help="Expected first name to verify against",
+    )
+    profile_health_parser.add_argument(
+        "--expected-last-name",
+        help="Expected last name to verify against",
+    )
+    profile_health_parser.add_argument(
+        "--expected-username",
+        help="Expected username to verify against",
+    )
+    profile_health_parser.add_argument(
+        "--expected-about",
+        help="Expected bio/about to verify against",
     )
 
     # change-profile command
@@ -164,6 +206,23 @@ def main() -> None:
 
     if args.command == "health-check":
         result = health_check(profile=args.profile)
+        sys.exit(0 if result and result.get("ok") else 1)
+
+    elif args.command == "get-profile":
+        result = get_profile(
+            profile=args.profile,
+            include_photo=args.include_photo,
+        )
+        sys.exit(0 if result else 1)
+
+    elif args.command == "profile-health-check":
+        result = profile_health_check(
+            profile=args.profile,
+            expected_first_name=args.expected_first_name,
+            expected_last_name=args.expected_last_name,
+            expected_username=args.expected_username,
+            expected_about=args.expected_about,
+        )
         sys.exit(0 if result and result.get("ok") else 1)
 
     elif args.command == "change-profile":

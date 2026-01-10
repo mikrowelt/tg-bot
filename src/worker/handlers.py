@@ -67,11 +67,47 @@ async def handle_change_profile(bot: TgBot, args: dict[str, Any]) -> dict[str, A
     return {"success": True}
 
 
+async def handle_get_profile(bot: TgBot, args: dict[str, Any]) -> dict[str, Any]:
+    """Handle get_profile command."""
+    import base64
+
+    result = await bot.get_profile()
+
+    # Check if photo should be included
+    include_photo = args.get("include_photo", False)
+
+    if result.get("photo") is not None:
+        if include_photo:
+            # Base64 encode photo for JSON serialization
+            result["photo"] = base64.b64encode(result["photo"]).decode("utf-8")
+            result["photo_encoding"] = "base64"
+        else:
+            # Just indicate photo exists
+            result["photo"] = True
+            result["photo_encoding"] = None
+    else:
+        result["photo_encoding"] = None
+
+    return result
+
+
+async def handle_profile_health_check(bot: TgBot, args: dict[str, Any]) -> dict[str, Any]:
+    """Handle profile_health_check command."""
+    return await bot.profile_health_check(
+        expected_first_name=args.get("expected_first_name"),
+        expected_last_name=args.get("expected_last_name"),
+        expected_username=args.get("expected_username"),
+        expected_about=args.get("expected_about"),
+    )
+
+
 # Command handler mapping
 HANDLERS = {
     Command.JOIN_CHANNEL: handle_join_channel,
     Command.SEND_MESSAGE: handle_send_message,
     Command.CHANGE_PROFILE: handle_change_profile,
+    Command.GET_PROFILE: handle_get_profile,
+    Command.PROFILE_HEALTH_CHECK: handle_profile_health_check,
 }
 
 
