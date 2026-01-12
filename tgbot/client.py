@@ -394,6 +394,70 @@ class TgBot:
             log.error(f"Comment failed: {e}")
             return SendResult(ok=False, error=str(e), retryable=True)
 
+    async def verify_in_comments(self, channel: int | str, post_id: int) -> bool:
+        """
+        Check for and handle verification bot messages in post comments.
+        Call this after sending a comment to handle bots like Combot.
+
+        Returns True if verification was handled (or not needed).
+        """
+        log.info(f"Checking for verification bots in comments of post {post_id}")
+        try:
+            await asyncio.sleep(random.uniform(2, 4))
+
+            # Get recent comments on this post
+            entity = await self.client.get_entity(channel)
+
+            # Get the discussion/comments for this post
+            async for message in self.client.iter_messages(
+                entity,
+                reply_to=post_id,
+                limit=10
+            ):
+                sender = await message.get_sender()
+                if not sender:
+                    continue
+
+                # Check if sender is a bot
+                is_bot = hasattr(sender, "bot") and sender.bot
+                if not is_bot:
+                    continue
+
+                bot_name = getattr(sender, 'first_name', 'Unknown')
+                bot_username = getattr(sender, 'username', 'unknown')
+                log.info(f"Found bot in comments: {bot_name} (@{bot_username})")
+
+                # Check for buttons
+                if message.reply_markup and hasattr(message.reply_markup, "rows"):
+                    rows = message.reply_markup.rows
+                    for row in rows:
+                        for button in row.buttons:
+                            button_type = type(button).__name__
+
+                            if button_type == "KeyboardButtonCallback":
+                                log.info(f"Clicking verification button: {button.text}")
+                                await asyncio.sleep(random.uniform(2, 5))
+                                try:
+                                    result = await message.click(data=button.data)
+                                    result_msg = result.message if result else "OK"
+                                    log.info(f"Verification button clicked: {result_msg}")
+                                    await asyncio.sleep(random.uniform(2, 4))
+                                    return True
+                                except FloodWaitError as e:
+                                    log.warning(f"Rate limited clicking button: {e.seconds}s")
+                                    await asyncio.sleep(e.seconds + 5)
+                                    return False
+                                except Exception as e:
+                                    log.warning(f"Button click failed: {e}")
+                                    continue
+
+            log.info("No verification bot found in comments")
+            return True
+
+        except Exception as e:
+            log.error(f"Error checking verification in comments: {e}")
+            return False
+
     async def get_target_type(self, target: int | str) -> str:
         """
         Determine if a target is a channel, supergroup, or group.
