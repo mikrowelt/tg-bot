@@ -16,6 +16,7 @@ from telethon.errors import (
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
 from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest
 
 from .utils.config import Config
 from .utils.logger import setup_logger
@@ -665,3 +666,113 @@ class TgBot:
             result["errors"].append(f"Check failed: {e}")
 
         return result
+
+    async def delete_all_profile_photos(self) -> int:
+        """
+        Delete all profile photos from the account.
+
+        Returns:
+            Number of photos deleted
+        """
+        log.info("Deleting all profile photos...")
+
+        try:
+            # Get current user
+            me = await self.client.get_me()
+
+            # Fetch all photos with pagination
+            all_photos = []
+            offset = 0
+
+            while True:
+                result = await self.client(GetUserPhotosRequest(
+                    user_id=me.id,
+                    offset=offset,
+                    max_id=0,
+                    limit=100
+                ))
+
+                if not result.photos:
+                    break
+
+                all_photos.extend(result.photos)
+
+                # Check if more photos available
+                if hasattr(result, 'count'):
+                    if len(all_photos) >= result.count:
+                        break
+
+                offset += 100
+                await asyncio.sleep(0.5)  # Small delay between pagination requests
+
+            if not all_photos:
+                log.info("No profile photos to delete")
+                return 0
+
+            log.info(f"Found {len(all_photos)} profile photos to delete")
+
+            # Delete all photos
+            deleted = await self.client(DeletePhotosRequest(id=all_photos))
+            deleted_count = len(deleted) if deleted else len(all_photos)
+
+            log.info(f"Deleted {deleted_count} profile photos")
+            return deleted_count
+
+        except FloodWaitError as e:
+            log.error(f"Rate limited for {e.seconds}s while deleting photos")
+            raise ProfileUpdateError(f"Rate limited: wait {e.seconds} seconds")
+        except Exception as e:
+            log.error(f"Failed to delete profile photos: {e}")
+            raise ProfileUpdateError(f"Failed to delete photos: {e}")
+
+    async def upload_multiple_photos(
+        self,
+        photo_paths: list[str],
+        delay_seconds: float = 3.0
+    ) -> list[int]:
+        """
+        Upload multiple profile photos with delay between each upload.
+
+        Args:
+            photo_paths: List of paths to photo files
+            delay_seconds: Delay between uploads (default 3s to avoid rate limits)
+
+        Returns:
+            List of photo IDs for uploaded photos
+        """
+        if not photo_paths:
+            log.info("No photos to upload")
+            return []
+
+        log.info(f"Uploading {len(photo_paths)} profile photos with {delay_seconds}s delay...")
+        uploaded_ids = []
+
+        for i, photo_path in enumerate(photo_paths):
+            try:
+                log.debug(f"Uploading photo {i + 1}/{len(photo_paths)}: {photo_path}")
+
+                result = await self.client(functions.photos.UploadProfilePhotoRequest(
+                    file=await self.client.upload_file(photo_path)
+                ))
+
+                # Extract photo ID from result
+                if hasattr(result, 'photo') and result.photo:
+                    uploaded_ids.append(result.photo.id)
+                    log.info(f"Uploaded photo {i + 1}/{len(photo_paths)} (id={result.photo.id})")
+                else:
+                    log.info(f"Uploaded photo {i + 1}/{len(photo_paths)}")
+
+                # Delay between uploads (except after last one)
+                if i < len(photo_paths) - 1:
+                    log.debug(f"Waiting {delay_seconds}s before next upload...")
+                    await asyncio.sleep(delay_seconds)
+
+            except FloodWaitError as e:
+                log.error(f"Rate limited for {e.seconds}s while uploading photo {i + 1}")
+                raise ProfileUpdateError(f"Rate limited: wait {e.seconds} seconds")
+            except Exception as e:
+                log.error(f"Failed to upload photo {i + 1}: {e}")
+                raise ProfileUpdateError(f"Failed to upload photo {photo_path}: {e}")
+
+        log.info(f"Successfully uploaded {len(uploaded_ids)} photos")
+        return uploaded_ids
