@@ -1,19 +1,35 @@
-name: Deploy to Production
+name: Deploy
 
 on:
   push:
     branches:
       - main
+      - stage
   workflow_dispatch:
 
 jobs:
-  deploy:
+  deploy-staging:
+    if: github.ref == 'refs/heads/stage'
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to server
+      - name: Deploy to staging server
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
+          host: ${{ secrets.STAGING_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/tg/tg-bot && git pull origin stage
+            echo "tg-bot updated - no container rebuild needed (mounted volume)"
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
