@@ -394,6 +394,75 @@ class TgBot:
             log.error(f"Comment failed: {e}")
             return SendResult(ok=False, error=str(e), retryable=True)
 
+    async def get_target_type(self, target: int | str) -> str:
+        """
+        Determine if a target is a channel, supergroup, or group.
+
+        Returns:
+            "channel" for broadcast channels (can only comment on posts)
+            "supergroup" for supergroups (can send direct messages)
+            "group" for basic groups (can send direct messages)
+        """
+        try:
+            entity = await self.client.get_entity(target)
+
+            if isinstance(entity, Channel):
+                if entity.broadcast:
+                    return "channel"
+                else:
+                    return "supergroup"
+            elif isinstance(entity, Chat):
+                return "group"
+            else:
+                return "unknown"
+
+        except Exception as e:
+            log.error(f"Failed to get target type: {e}")
+            raise TgBotError(f"Failed to get target type: {e}")
+
+    async def get_latest_post(self, channel: int | str, with_comments: bool = True) -> dict | None:
+        """
+        Get the latest post from a broadcast channel.
+
+        Args:
+            channel: Channel username or ID
+            with_comments: If True, only return posts that have comments enabled
+
+        Returns:
+            Dict with post info: {id, text, date, views, comments_enabled}
+            or None if no suitable post found
+        """
+        log.info(f"Getting latest post from: {channel}")
+        try:
+            entity = await self.client.get_entity(channel)
+
+            # Get recent messages from the channel
+            async for message in self.client.iter_messages(entity, limit=10):
+                # Skip service messages (joins, pins, etc.)
+                if message.action is not None:
+                    continue
+
+                # Check if comments are enabled on this post
+                comments_enabled = hasattr(message, 'replies') and message.replies is not None
+
+                if with_comments and not comments_enabled:
+                    continue
+
+                return {
+                    "id": message.id,
+                    "text": message.text or "",
+                    "date": message.date.isoformat() if message.date else None,
+                    "views": getattr(message, 'views', None),
+                    "comments_enabled": comments_enabled,
+                }
+
+            log.warning(f"No suitable post found in {channel}")
+            return None
+
+        except Exception as e:
+            log.error(f"Failed to get latest post: {e}")
+            raise TgBotError(f"Failed to get latest post: {e}")
+
     # ============ PROFILE OPERATIONS ============
 
     async def change_profile(
