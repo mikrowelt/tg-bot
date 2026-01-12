@@ -14,9 +14,10 @@ from telethon.errors import (
     ForbiddenError,
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
-from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest, GetDialogsRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest
+from telethon.tl.types import Channel, Chat, InputPeerEmpty
 
 from .utils.config import Config
 from .utils.logger import setup_logger
@@ -776,3 +777,134 @@ class TgBot:
 
         log.info(f"Successfully uploaded {len(uploaded_ids)} photos")
         return uploaded_ids
+
+    async def get_joined_channels(self) -> list[dict]:
+        """
+        Get list of all channels and groups the account has joined.
+
+        Returns:
+            List of dicts with channel/group info:
+            [
+                {
+                    "id": int,
+                    "title": str,
+                    "username": str | None,
+                    "type": "channel" | "group" | "supergroup",
+                    "participants_count": int | None,
+                }
+            ]
+        """
+        log.info("Fetching joined channels and groups...")
+
+        channels = []
+
+        try:
+            # Use iter_dialogs which handles pagination automatically
+            async for dialog in self.client.iter_dialogs():
+                entity = dialog.entity
+
+                # Only include channels and groups, not private chats
+                if isinstance(entity, Channel):
+                    channel_type = "channel" if entity.broadcast else "supergroup"
+                    channels.append({
+                        "id": entity.id,
+                        "title": entity.title,
+                        "username": entity.username,
+                        "type": channel_type,
+                        "participants_count": getattr(entity, 'participants_count', None),
+                    })
+                elif isinstance(entity, Chat):
+                    channels.append({
+                        "id": entity.id,
+                        "title": entity.title,
+                        "username": None,
+                        "type": "group",
+                        "participants_count": getattr(entity, 'participants_count', None),
+                    })
+
+            log.info(f"Found {len(channels)} joined channels/groups")
+            return channels
+
+        except FloodWaitError as e:
+            log.error(f"Rate limited for {e.seconds}s while fetching dialogs")
+            raise TgBotError(f"Rate limited: wait {e.seconds} seconds")
+        except Exception as e:
+            log.error(f"Failed to fetch joined channels: {e}")
+            raise TgBotError(f"Failed to fetch channels: {e}")
+
+    async def get_profile_photos(self, download_path: str | None = None) -> list[dict]:
+        """
+        Get all profile photos from the account.
+
+        Args:
+            download_path: Optional directory to download photos to.
+                          If provided, photos will be saved as files.
+
+        Returns:
+            List of dicts with photo info:
+            [
+                {
+                    "id": int,
+                    "date": datetime,
+                    "file_path": str | None,  # Only if download_path provided
+                    "bytes": bytes | None,    # Only if download_path not provided
+                }
+            ]
+        """
+        log.info("Fetching profile photos...")
+
+        try:
+            me = await self.client.get_me()
+            photos = []
+            offset = 0
+
+            while True:
+                result = await self.client(GetUserPhotosRequest(
+                    user_id=me.id,
+                    offset=offset,
+                    max_id=0,
+                    limit=100
+                ))
+
+                if not result.photos:
+                    break
+
+                for photo in result.photos:
+                    photo_info = {
+                        "id": photo.id,
+                        "date": photo.date,
+                        "file_path": None,
+                        "bytes": None,
+                    }
+
+                    # Download the photo
+                    if download_path:
+                        import os
+                        file_path = os.path.join(download_path, f"photo_{photo.id}.jpg")
+                        await self.client.download_media(photo, file=file_path)
+                        photo_info["file_path"] = file_path
+                        log.debug(f"Downloaded photo {photo.id} to {file_path}")
+                    else:
+                        photo_bytes = await self.client.download_media(photo, file=bytes)
+                        photo_info["bytes"] = photo_bytes
+                        log.debug(f"Downloaded photo {photo.id} as bytes")
+
+                    photos.append(photo_info)
+
+                # Check if more photos available
+                if hasattr(result, 'count'):
+                    if len(photos) >= result.count:
+                        break
+
+                offset += 100
+                await asyncio.sleep(0.5)
+
+            log.info(f"Found {len(photos)} profile photos")
+            return photos
+
+        except FloodWaitError as e:
+            log.error(f"Rate limited for {e.seconds}s while fetching photos")
+            raise TgBotError(f"Rate limited: wait {e.seconds} seconds")
+        except Exception as e:
+            log.error(f"Failed to fetch profile photos: {e}")
+            raise TgBotError(f"Failed to fetch photos: {e}")
