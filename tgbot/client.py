@@ -675,16 +675,26 @@ class TgBot:
             log.info(f"Comment sent successfully (id={msg.id})")
 
             # Check for verification after comment
+            # Comments go to the discussion group, not the channel, so we need to check there
             if check_verification and self.ai_verification:
                 log.info("Checking for post-comment verification...")
-                verification_result = await self.ai_verification.check_and_handle_verification(
-                    chat_id=channel,
-                    our_message_id=msg.id,
-                    context="after_comment",
+
+                # Get the channel entity and its linked discussion group
+                channel_entity = await self.client.get_entity(channel)
+                channel_id = channel_entity.id if hasattr(channel_entity, 'id') else channel
+
+                # Use check_post_comments_verification which properly handles discussion groups
+                # Pass our message ID so it can detect replies to our comment
+                verification_result = await self.ai_verification.check_post_comments_verification(
+                    channel_id=channel_id,
+                    discussion_group_id=None,  # Will be auto-detected
+                    our_message_id=msg.id,  # The comment message ID (in discussion group)
                     wait_seconds=verification_wait_seconds,
                 )
                 if verification_result.action_taken:
                     log.info(f"Verification handled: {verification_result.action_taken}")
+                elif verification_result.error:
+                    log.warning(f"Verification check failed: {verification_result.error}")
 
             return SendResult(ok=True, message_id=msg.id)
 

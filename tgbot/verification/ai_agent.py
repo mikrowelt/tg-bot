@@ -744,6 +744,7 @@ Respond with JSON only."""
         self,
         channel_id: int,
         discussion_group_id: int | None = None,
+        our_message_id: int | None = None,
         wait_seconds: float = 3.0,
     ) -> VerificationResult:
         """
@@ -755,6 +756,7 @@ Respond with JSON only."""
         Args:
             channel_id: The broadcast channel ID
             discussion_group_id: The linked discussion group ID (if known)
+            our_message_id: ID of our comment message (to detect replies)
             wait_seconds: How long to wait before checking
 
         Returns:
@@ -762,7 +764,8 @@ Respond with JSON only."""
         """
         await self._ensure_user_info()
 
-        log.info(f"Checking for verification in post comments for channel {channel_id}")
+        log.info(f"Checking for verification in post comments for channel {channel_id}" +
+                 (f" (our_msg={our_message_id})" if our_message_id else ""))
 
         await asyncio.sleep(wait_seconds)
 
@@ -796,8 +799,8 @@ Respond with JSON only."""
                 if not message.reply_markup and not self._looks_like_verification(message.text):
                     continue
 
-                # Check if it might be for us (mentions our name, or is general verification)
-                if not self._is_message_for_us(message, None):
+                # Check if it might be for us (mentions our name, is a reply to our message, or general verification)
+                if not self._is_message_for_us(message, our_message_id):
                     continue
 
                 bot_username = getattr(sender, 'username', 'unknown')
