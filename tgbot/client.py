@@ -651,6 +651,7 @@ class TgBot:
         channel: int | str,
         post_id: int,
         text: str,
+        reply_to: int | None = None,
         check_verification: bool = False,
         verification_wait_seconds: float = 3.0,
     ) -> SendResult:
@@ -661,15 +662,16 @@ class TgBot:
             channel: Channel ID or username
             post_id: Post ID to comment on
             text: Comment text
+            reply_to: Message ID to reply to (for threading comments)
             check_verification: Check for verification after sending
             verification_wait_seconds: How long to wait before checking
 
         Returns SendResult (same as send_message).
         """
-        log.info(f"Sending comment to post {post_id} in {channel}")
+        log.info(f"Sending comment to post {post_id} in {channel}" + (f" (reply to {reply_to})" if reply_to else ""))
         try:
             await asyncio.sleep(random.uniform(1, 3))
-            msg = await self.client.send_message(channel, text, comment_to=post_id)
+            msg = await self.client.send_message(channel, text, comment_to=post_id, reply_to=reply_to)
             log.info(f"Comment sent successfully (id={msg.id})")
 
             # Check for verification after comment
