@@ -1228,6 +1228,97 @@ class TgBot:
             log.error(f"Failed to fetch joined channels: {e}")
             raise TgBotError(f"Failed to fetch channels: {e}")
 
+    async def get_channel_info(self, channel: int | str) -> dict:
+        """
+        Get detailed information about a channel or group.
+
+        Args:
+            channel: Channel ID, username, or invite link
+
+        Returns:
+            {
+                "id": int,
+                "title": str,
+                "username": str | None,
+                "description": str | None,
+                "member_count": int | None,
+                "type": "channel" | "supergroup" | "group",
+                "is_verified": bool,
+                "is_scam": bool,
+                "is_fake": bool,
+                "recent_posts": [  # Only for broadcast channels
+                    {
+                        "id": int,
+                        "text": str,
+                        "date": str,
+                        "views": int | None,
+                    }
+                ]
+            }
+        """
+        log.info(f"Fetching channel info for: {channel}")
+
+        try:
+            # Get the entity
+            entity = await self.client.get_entity(channel)
+
+            result = {
+                "id": entity.id,
+                "title": getattr(entity, 'title', None),
+                "username": getattr(entity, 'username', None),
+                "description": None,
+                "member_count": None,
+                "type": "group",
+                "is_verified": False,
+                "is_scam": False,
+                "is_fake": False,
+                "recent_posts": [],
+            }
+
+            if isinstance(entity, Channel):
+                result["type"] = "channel" if entity.broadcast else "supergroup"
+                result["is_verified"] = getattr(entity, 'verified', False)
+                result["is_scam"] = getattr(entity, 'scam', False)
+                result["is_fake"] = getattr(entity, 'fake', False)
+
+                # Get full channel info for description and member count
+                try:
+                    full_channel = await self.client(GetFullChannelRequest(entity))
+                    result["description"] = getattr(full_channel.full_chat, 'about', None)
+                    result["member_count"] = getattr(full_channel.full_chat, 'participants_count', None)
+                except Exception as e:
+                    log.warning(f"Could not get full channel info: {e}")
+                    result["member_count"] = getattr(entity, 'participants_count', None)
+
+                # Get recent posts for broadcast channels
+                if entity.broadcast:
+                    try:
+                        posts = []
+                        async for message in self.client.iter_messages(entity, limit=10):
+                            # Skip service messages
+                            if message.action is not None:
+                                continue
+                            posts.append({
+                                "id": message.id,
+                                "text": (message.text or "")[:500],  # Truncate long texts
+                                "date": message.date.isoformat() if message.date else None,
+                                "views": getattr(message, 'views', None),
+                            })
+                        result["recent_posts"] = posts
+                    except Exception as e:
+                        log.warning(f"Could not fetch recent posts: {e}")
+
+            elif isinstance(entity, Chat):
+                result["type"] = "group"
+                result["member_count"] = getattr(entity, 'participants_count', None)
+
+            log.info(f"Got channel info: {result['title']} ({result['type']}, {result['member_count']} members)")
+            return result
+
+        except Exception as e:
+            log.error(f"Failed to get channel info: {e}")
+            raise TgBotError(f"Failed to get channel info: {e}")
+
     async def get_profile_photos(self, download_path: str | None = None) -> list[dict]:
         """
         Get all profile photos from the account.
