@@ -15,6 +15,7 @@ from telethon.errors import (
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest, GetDialogsRequest
+from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest
 from telethon.tl.types import Channel, Chat, InputPeerEmpty
@@ -280,6 +281,11 @@ class TgBot:
             log.error("Could not determine channel ID")
             raise JoinChannelError("Could not determine channel ID")
 
+        # Try to join linked discussion group (needed for commenting)
+        discussion_group_id = await self._join_linked_discussion(channel_id)
+        if discussion_group_id:
+            log.info(f"Also joined linked discussion group: {discussion_group_id}")
+
         # Run verification if requested
         if verify:
             log.info("Starting bot verification...")
@@ -331,6 +337,49 @@ class TgBot:
                 return entity.id
         except Exception as e:
             log.warning(f"Failed to get channel ID: {e}")
+            return None
+
+    async def _join_linked_discussion(self, channel_id: int) -> int | None:
+        """
+        Join the linked discussion group of a channel if it exists.
+        This is needed to be able to post comments on channel posts.
+
+        Returns the discussion group ID if joined, None otherwise.
+        """
+        try:
+            # Get full channel info to find linked discussion group
+            entity = await self.client.get_entity(channel_id)
+            if not isinstance(entity, Channel):
+                return None
+
+            full_channel = await self.client(GetFullChannelRequest(entity))
+
+            # Check if there's a linked chat (discussion group)
+            linked_chat_id = getattr(full_channel.full_chat, 'linked_chat_id', None)
+            if not linked_chat_id:
+                log.debug(f"Channel {channel_id} has no linked discussion group")
+                return None
+
+            log.info(f"Found linked discussion group: {linked_chat_id}")
+
+            # Try to join the discussion group
+            try:
+                discussion_entity = await self.client.get_entity(linked_chat_id)
+                await asyncio.sleep(random.uniform(1, 3))
+                await self.client(functions.channels.JoinChannelRequest(discussion_entity))
+                log.info(f"Joined discussion group: {linked_chat_id}")
+                return linked_chat_id
+
+            except UserAlreadyParticipantError:
+                log.debug(f"Already a member of discussion group {linked_chat_id}")
+                return linked_chat_id
+
+            except Exception as e:
+                log.warning(f"Could not join discussion group {linked_chat_id}: {e}")
+                return None
+
+        except Exception as e:
+            log.debug(f"Could not get linked discussion for channel {channel_id}: {e}")
             return None
 
     # ============ MESSAGE OPERATIONS ============
