@@ -12,6 +12,9 @@ from telethon.errors import (
     ChatRestrictedError,
     SlowModeWaitError,
     ForbiddenError,
+    UsernameOccupiedError,
+    UsernameInvalidError,
+    UsernameNotModifiedError,
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest, GetAuthorizationsRequest, ResetAuthorizationRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest, GetDialogsRequest
@@ -912,6 +915,85 @@ class TgBot:
         except Exception as e:
             log.error(f"Profile update failed: {e}")
             raise ProfileUpdateError(f"Failed to update profile: {e}")
+
+    async def set_username(self, username: str, max_attempts: int = 10) -> dict:
+        """
+        Set username with automatic retry if taken.
+
+        If the username is already taken, tries variations by appending numbers
+        until a unique one is found.
+
+        Args:
+            username: Desired username (without @)
+            max_attempts: Maximum number of variations to try
+
+        Returns:
+            {
+                "success": bool,
+                "username": str - The actual username set (may differ from requested),
+                "attempts": int - Number of attempts made,
+                "error": str | None
+            }
+        """
+        result = {
+            "success": False,
+            "username": None,
+            "original_username": username,
+            "attempts": 0,
+            "error": None,
+        }
+
+        # Clean username - remove @ if present, lowercase
+        username = username.lstrip("@").lower()
+
+        # Generate username variations
+        variations = [username]
+        for i in range(1, max_attempts):
+            # Try with numbers: username1, username2, etc.
+            variations.append(f"{username}{i}")
+            # Also try with random suffix for more uniqueness
+            if i > 5:
+                import random as rnd
+                variations.append(f"{username}{rnd.randint(100, 999)}")
+
+        for attempt, try_username in enumerate(variations[:max_attempts], 1):
+            result["attempts"] = attempt
+            try:
+                log.debug(f"Trying username: @{try_username} (attempt {attempt})")
+                await self.client(UpdateUsernameRequest(username=try_username))
+                result["success"] = True
+                result["username"] = try_username
+                log.info(f"Username set to @{try_username}")
+                return result
+
+            except UsernameOccupiedError:
+                log.debug(f"Username @{try_username} is taken, trying next variation")
+                continue
+
+            except UsernameNotModifiedError:
+                # Username is the same as current - that's fine
+                result["success"] = True
+                result["username"] = try_username
+                log.info(f"Username @{try_username} is already set")
+                return result
+
+            except UsernameInvalidError as e:
+                log.warning(f"Username @{try_username} is invalid: {e}")
+                continue
+
+            except FloodWaitError as e:
+                result["error"] = f"Rate limited: wait {e.seconds} seconds"
+                log.error(result["error"])
+                return result
+
+            except Exception as e:
+                result["error"] = str(e)
+                log.error(f"Failed to set username: {e}")
+                return result
+
+        result["error"] = f"Could not find available username after {max_attempts} attempts"
+        log.warning(result["error"])
+        return result
 
     async def get_profile(self) -> dict:
         """
