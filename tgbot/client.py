@@ -443,9 +443,22 @@ class TgBot:
 
             channel_id = entity.id
 
-            # Leave the channel
+            # Leave the channel/group
             await asyncio.sleep(random.uniform(1, 2))
-            await self.client(functions.channels.LeaveChannelRequest(entity))
+
+            if isinstance(entity, Channel):
+                # For channels/supergroups
+                await self.client(functions.channels.LeaveChannelRequest(entity))
+            elif isinstance(entity, Chat):
+                # For regular groups - need to delete self from chat
+                me = await self.client.get_me()
+                await self.client(functions.messages.DeleteChatUserRequest(
+                    chat_id=entity.id,
+                    user_id=me.id
+                ))
+            else:
+                return {"success": False, "error": f"Unknown entity type: {type(entity)}"}
+
             log.info(f"Left channel: {channel_id}")
 
             return {"success": True, "channel_id": channel_id}
