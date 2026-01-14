@@ -408,6 +408,52 @@ class TgBot:
             log.debug(f"Could not get linked discussion for channel {channel_id}: {e}")
             return None
 
+    async def leave_channel(self, channel: int | str) -> dict:
+        """
+        Leave a channel or group.
+
+        Args:
+            channel: Channel/group ID, username, or invite link
+
+        Returns dict with:
+            - success: bool
+            - channel_id: int (if success)
+            - error: str (if failed)
+        """
+        log.info(f"Leaving channel: {channel}")
+
+        try:
+            # Get entity from ID, username, or link
+            if isinstance(channel, str):
+                if "/+" in channel or "joinchat" in channel:
+                    # Private channel - need to get ID first
+                    invite_hash = channel.split("/")[-1].replace("+", "")
+                    result = await self.client(CheckChatInviteRequest(invite_hash))
+                    if hasattr(result, "chat"):
+                        entity = result.chat
+                    else:
+                        return {"success": False, "error": "Could not get channel from invite"}
+                else:
+                    # Public channel - get by username
+                    username = channel.split("/")[-1]
+                    entity = await self.client.get_entity(username)
+            else:
+                # Direct ID
+                entity = await self.client.get_entity(channel)
+
+            channel_id = entity.id
+
+            # Leave the channel
+            await asyncio.sleep(random.uniform(1, 2))
+            await self.client(functions.channels.LeaveChannelRequest(entity))
+            log.info(f"Left channel: {channel_id}")
+
+            return {"success": True, "channel_id": channel_id}
+
+        except Exception as e:
+            log.error(f"Failed to leave channel: {e}")
+            return {"success": False, "error": str(e)}
+
     # ============ MESSAGE OPERATIONS ============
 
     async def send_message(
