@@ -1228,12 +1228,19 @@ class TgBot:
             log.error(f"Failed to fetch joined channels: {e}")
             raise TgBotError(f"Failed to fetch channels: {e}")
 
-    async def get_channel_info(self, channel: int | str) -> dict:
+    async def get_channel_info(
+        self,
+        channel: int | str,
+        posts_limit: int = 10,
+        text_length: int = 500,
+    ) -> dict:
         """
         Get detailed information about a channel or group.
 
         Args:
             channel: Channel ID, username, or invite link
+            posts_limit: Maximum number of recent posts to fetch (default 10)
+            text_length: Maximum text length per post (default 500)
 
         Returns:
             {
@@ -1256,7 +1263,7 @@ class TgBot:
                 ]
             }
         """
-        log.info(f"Fetching channel info for: {channel}")
+        log.info(f"Fetching channel info for: {channel} (posts_limit={posts_limit}, text_length={text_length})")
 
         try:
             # Get the entity
@@ -1294,13 +1301,13 @@ class TgBot:
                 if entity.broadcast:
                     try:
                         posts = []
-                        async for message in self.client.iter_messages(entity, limit=10):
+                        async for message in self.client.iter_messages(entity, limit=posts_limit):
                             # Skip service messages
                             if message.action is not None:
                                 continue
                             posts.append({
                                 "id": message.id,
-                                "text": (message.text or "")[:500],  # Truncate long texts
+                                "text": (message.text or "")[:text_length],  # Truncate long texts
                                 "date": message.date.isoformat() if message.date else None,
                                 "views": getattr(message, 'views', None),
                             })
