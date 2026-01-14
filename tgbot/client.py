@@ -304,6 +304,18 @@ class TgBot:
                 if result.action_taken:
                     log.info(f"AI verification handled: {result.action_taken} (cached: {result.cached})")
 
+                # Also check for verification in discussion group if we joined one
+                if discussion_group_id:
+                    log.info("Checking verification in discussion group...")
+                    disc_result = await self.ai_verification.check_and_handle_verification(
+                        chat_id=discussion_group_id,
+                        context="after_join_discussion",
+                        wait_seconds=verification_wait_seconds,
+                    )
+
+                    if disc_result.action_taken:
+                        log.info(f"Discussion group verification handled: {disc_result.action_taken} (cached: {disc_result.cached})")
+
                 # Also check for DM verification
                 dm_result = await self.ai_verification.check_dm_verification(
                     wait_seconds=verification_wait_seconds
@@ -316,6 +328,9 @@ class TgBot:
                 # Fall back to legacy verification
                 await asyncio.sleep(random.uniform(3, 7))
                 await self.verification.verify(channel_id)
+                if discussion_group_id:
+                    await asyncio.sleep(random.uniform(2, 4))
+                    await self.verification.verify(discussion_group_id)
 
             # Extra wait for permissions to propagate
             log.debug("Waiting for permissions to update...")
