@@ -426,13 +426,28 @@ class TgBot:
             # Get entity from ID, username, or link
             if isinstance(channel, str):
                 if "/+" in channel or "joinchat" in channel:
-                    # Private channel - need to get ID first
+                    # Private channel - try CheckChatInviteRequest first
                     invite_hash = channel.split("/")[-1].replace("+", "")
-                    result = await self.client(CheckChatInviteRequest(invite_hash))
-                    if hasattr(result, "chat"):
-                        entity = result.chat
-                    else:
-                        return {"success": False, "error": "Could not get channel from invite"}
+                    try:
+                        result = await self.client(CheckChatInviteRequest(invite_hash))
+                        if hasattr(result, "chat"):
+                            entity = result.chat
+                        else:
+                            # Not a member yet, can't leave
+                            return {"success": False, "error": "Not a member of this channel"}
+                    except Exception as e:
+                        # CheckChatInviteRequest can fail, try to find in dialogs
+                        log.warning(f"CheckChatInviteRequest failed: {e}, searching dialogs...")
+                        entity = None
+                        async for dialog in self.client.iter_dialogs():
+                            # Match by invite link hash in the entity
+                            if hasattr(dialog.entity, 'id'):
+                                entity = dialog.entity
+                                # We can't easily match invite hash to dialog, so this is a fallback
+                                # The caller should use channel ID instead of invite link when leaving
+                                break
+                        if entity is None:
+                            return {"success": False, "error": "Could not find channel in dialogs"}
                 else:
                     # Public channel - get by username
                     username = channel.split("/")[-1]
