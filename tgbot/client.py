@@ -23,6 +23,15 @@ from .utils.config import Config
 from .utils.logger import setup_logger
 from .verification import ButtonVerification
 
+# Import AI verification (optional - may not be available if anthropic not installed)
+try:
+    from .verification import AIVerificationAgent, VerificationResult
+    AI_VERIFICATION_AVAILABLE = True
+except ImportError:
+    AI_VERIFICATION_AVAILABLE = False
+    AIVerificationAgent = None
+    VerificationResult = None
+
 log = setup_logger("tg-bot.client")
 
 
@@ -59,10 +68,12 @@ class SendResult:
 class TgBot:
     """Telegram bot client wrapper."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, anthropic_api_key: str | None = None):
         self.config = config
+        self.anthropic_api_key = anthropic_api_key
         self._client: TelegramClient | None = None
         self._verification: ButtonVerification | None = None
+        self._ai_verification: "AIVerificationAgent | None" = None
 
     @property
     def client(self) -> TelegramClient:
@@ -77,6 +88,20 @@ class TgBot:
                 self.client, self.config.captcha_api_key
             )
         return self._verification
+
+    @property
+    def ai_verification(self) -> "AIVerificationAgent | None":
+        """Get AI verification agent (lazy initialization)."""
+        if not AI_VERIFICATION_AVAILABLE:
+            return None
+
+        if self._ai_verification is None and self.anthropic_api_key:
+            self._ai_verification = AIVerificationAgent(
+                self.client,
+                api_key=self.anthropic_api_key,
+            )
+
+        return self._ai_verification
 
     async def connect(self) -> None:
         """Connect to Telegram and authenticate."""
@@ -199,9 +224,22 @@ class TgBot:
 
     # ============ CHANNEL OPERATIONS ============
 
-    async def join_channel(self, channel_link: str, verify: bool = True) -> int:
+    async def join_channel(
+        self,
+        channel_link: str,
+        verify: bool = True,
+        use_ai_verification: bool = True,
+        verification_wait_seconds: float = 5.0,
+    ) -> int:
         """
         Join a channel and optionally pass bot verification.
+
+        Args:
+            channel_link: Channel link or username
+            verify: Whether to run verification after joining
+            use_ai_verification: Use AI agent for verification (requires anthropic_api_key)
+            verification_wait_seconds: How long to wait before checking for verification
+
         Returns the channel ID.
         Raises JoinChannelError on failure.
         """
@@ -245,8 +283,34 @@ class TgBot:
         # Run verification if requested
         if verify:
             log.info("Starting bot verification...")
-            await asyncio.sleep(random.uniform(3, 7))
-            await self.verification.verify(channel_id)
+
+            # Try AI verification first if available
+            if use_ai_verification and self.ai_verification:
+                log.info("Using AI verification agent...")
+
+                # Check for verification in channel
+                result = await self.ai_verification.check_and_handle_verification(
+                    chat_id=channel_id,
+                    context="after_join",
+                    wait_seconds=verification_wait_seconds,
+                )
+
+                if result.action_taken:
+                    log.info(f"AI verification handled: {result.action_taken} (cached: {result.cached})")
+
+                # Also check for DM verification
+                dm_result = await self.ai_verification.check_dm_verification(
+                    wait_seconds=verification_wait_seconds
+                )
+
+                if dm_result.action_taken:
+                    log.info(f"AI DM verification handled: {dm_result.action_taken}")
+
+            else:
+                # Fall back to legacy verification
+                await asyncio.sleep(random.uniform(3, 7))
+                await self.verification.verify(channel_id)
+
             # Extra wait for permissions to propagate
             log.debug("Waiting for permissions to update...")
             await asyncio.sleep(random.uniform(2, 4))
@@ -276,10 +340,19 @@ class TgBot:
         target: int | str,
         text: str,
         reply_to: int | None = None,
+        check_verification: bool = False,
+        verification_wait_seconds: float = 3.0,
     ) -> SendResult:
         """
         Send a message to a chat, channel, or user.
         Can also reply to a specific message.
+
+        Args:
+            target: Chat/channel/user ID or username
+            text: Message text
+            reply_to: Message ID to reply to
+            check_verification: Check for verification after sending (for first message)
+            verification_wait_seconds: How long to wait before checking
 
         Returns SendResult with:
             - ok: True if message was sent
@@ -294,6 +367,19 @@ class TgBot:
             await asyncio.sleep(random.uniform(1, 3))
             msg = await self.client.send_message(target, text, reply_to=reply_to)
             log.info(f"Message sent successfully (id={msg.id})")
+
+            # Check for verification after first message
+            if check_verification and self.ai_verification:
+                log.info("Checking for post-message verification...")
+                verification_result = await self.ai_verification.check_and_handle_verification(
+                    chat_id=target,
+                    our_message_id=msg.id,
+                    context="after_message",
+                    wait_seconds=verification_wait_seconds,
+                )
+                if verification_result.action_taken:
+                    log.info(f"Verification handled: {verification_result.action_taken}")
+
             return SendResult(ok=True, message_id=msg.id)
 
         except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
@@ -354,9 +440,24 @@ class TgBot:
                 retryable=True,
             )
 
-    async def send_comment(self, channel: int | str, post_id: int, text: str) -> SendResult:
+    async def send_comment(
+        self,
+        channel: int | str,
+        post_id: int,
+        text: str,
+        check_verification: bool = False,
+        verification_wait_seconds: float = 3.0,
+    ) -> SendResult:
         """
         Send a comment to a channel post.
+
+        Args:
+            channel: Channel ID or username
+            post_id: Post ID to comment on
+            text: Comment text
+            check_verification: Check for verification after sending
+            verification_wait_seconds: How long to wait before checking
+
         Returns SendResult (same as send_message).
         """
         log.info(f"Sending comment to post {post_id} in {channel}")
@@ -364,6 +465,19 @@ class TgBot:
             await asyncio.sleep(random.uniform(1, 3))
             msg = await self.client.send_message(channel, text, comment_to=post_id)
             log.info(f"Comment sent successfully (id={msg.id})")
+
+            # Check for verification after comment
+            if check_verification and self.ai_verification:
+                log.info("Checking for post-comment verification...")
+                verification_result = await self.ai_verification.check_and_handle_verification(
+                    chat_id=channel,
+                    our_message_id=msg.id,
+                    context="after_comment",
+                    wait_seconds=verification_wait_seconds,
+                )
+                if verification_result.action_taken:
+                    log.info(f"Verification handled: {verification_result.action_taken}")
+
             return SendResult(ok=True, message_id=msg.id)
 
         except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
