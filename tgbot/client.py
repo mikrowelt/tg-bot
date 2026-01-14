@@ -13,7 +13,7 @@ from telethon.errors import (
     SlowModeWaitError,
     ForbiddenError,
 )
-from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
+from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest, GetAuthorizationsRequest, ResetAuthorizationRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest, GetDialogsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.users import GetFullUserRequest
@@ -220,6 +220,60 @@ class TgBot:
         except Exception as e:
             result["error"] = str(e)
             log.warning(f"Health check failed: {e}")
+
+        return result
+
+    async def terminate_other_sessions(self) -> dict:
+        """
+        Terminate all other active Telegram sessions except the current one.
+
+        This is a security measure to ensure only our bot session is active.
+
+        Returns:
+            dict with:
+                - terminated: int - Number of sessions terminated
+                - kept: int - Number of sessions kept (current session)
+                - sessions: list - Details of terminated sessions
+                - error: str | None - Error message if any
+        """
+        result = {
+            "terminated": 0,
+            "kept": 0,
+            "sessions": [],
+            "error": None,
+        }
+
+        try:
+            # Get all active authorizations
+            authorizations = await self.client(GetAuthorizationsRequest())
+
+            for auth in authorizations.authorizations:
+                if auth.current:
+                    # This is our current session, keep it
+                    result["kept"] += 1
+                    log.debug(f"Keeping current session: {auth.device_model} ({auth.platform})")
+                else:
+                    # Terminate this session
+                    try:
+                        await self.client(ResetAuthorizationRequest(hash=auth.hash))
+                        result["terminated"] += 1
+                        result["sessions"].append({
+                            "device": auth.device_model,
+                            "platform": auth.platform,
+                            "app": auth.app_name,
+                            "location": f"{auth.country}, {auth.region}",
+                            "date_created": str(auth.date_created) if auth.date_created else None,
+                            "date_active": str(auth.date_active) if auth.date_active else None,
+                        })
+                        log.info(f"Terminated session: {auth.device_model} ({auth.platform}) - {auth.app_name}")
+                    except Exception as e:
+                        log.warning(f"Failed to terminate session {auth.hash}: {e}")
+
+            log.info(f"Session cleanup complete: {result['terminated']} terminated, {result['kept']} kept")
+
+        except Exception as e:
+            result["error"] = str(e)
+            log.error(f"Failed to get/terminate sessions: {e}")
 
         return result
 
