@@ -968,6 +968,7 @@ class TgBot:
 
             except UsernameOccupiedError:
                 log.debug(f"Username @{try_username} is taken, trying next variation")
+                await asyncio.sleep(2)  # Delay between attempts to avoid rate limit
                 continue
 
             except UsernameNotModifiedError:
@@ -979,12 +980,19 @@ class TgBot:
 
             except UsernameInvalidError as e:
                 log.warning(f"Username @{try_username} is invalid: {e}")
+                await asyncio.sleep(2)  # Delay between attempts to avoid rate limit
                 continue
 
             except FloodWaitError as e:
-                result["error"] = f"Rate limited: wait {e.seconds} seconds"
-                log.error(result["error"])
-                return result
+                # If we hit rate limit, wait and continue (don't return immediately)
+                if e.seconds <= 30:
+                    log.warning(f"Rate limited for {e.seconds}s, waiting...")
+                    await asyncio.sleep(e.seconds + 1)
+                    continue
+                else:
+                    result["error"] = f"Rate limited: wait {e.seconds} seconds"
+                    log.error(result["error"])
+                    return result
 
             except Exception as e:
                 result["error"] = str(e)
