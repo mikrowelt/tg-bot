@@ -316,6 +316,17 @@ class TgBot:
                     if disc_result.action_taken:
                         log.info(f"Discussion group verification handled: {disc_result.action_taken} (cached: {disc_result.cached})")
 
+                # Check for verification in post comments
+                log.info("Checking verification in post comments...")
+                comments_result = await self.ai_verification.check_post_comments_verification(
+                    channel_id=channel_id,
+                    discussion_group_id=discussion_group_id,
+                    wait_seconds=verification_wait_seconds,
+                )
+
+                if comments_result.action_taken:
+                    log.info(f"Post comments verification handled: {comments_result.action_taken} (cached: {comments_result.cached})")
+
                 # Also check for DM verification
                 dm_result = await self.ai_verification.check_dm_verification(
                     wait_seconds=verification_wait_seconds

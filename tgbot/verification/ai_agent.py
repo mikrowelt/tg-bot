@@ -740,6 +740,135 @@ Respond with JSON only."""
             log.error(f"DM verification check failed: {e}")
             return VerificationResult(success=False, error=str(e))
 
+    async def check_post_comments_verification(
+        self,
+        channel_id: int,
+        discussion_group_id: int | None = None,
+        wait_seconds: float = 3.0,
+    ) -> VerificationResult:
+        """
+        Check for verification bots in channel post comments.
+
+        Some bots post verification messages as replies to the latest post
+        or in the discussion thread.
+
+        Args:
+            channel_id: The broadcast channel ID
+            discussion_group_id: The linked discussion group ID (if known)
+            wait_seconds: How long to wait before checking
+
+        Returns:
+            VerificationResult with success status and details
+        """
+        await self._ensure_user_info()
+
+        log.info(f"Checking for verification in post comments for channel {channel_id}")
+
+        await asyncio.sleep(wait_seconds)
+
+        try:
+            # If we don't have discussion group ID, try to get it
+            if not discussion_group_id:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                from telethon.tl.types import Channel
+
+                entity = await self.client.get_entity(channel_id)
+                if isinstance(entity, Channel):
+                    full_channel = await self.client(GetFullChannelRequest(entity))
+                    discussion_group_id = getattr(full_channel.full_chat, 'linked_chat_id', None)
+
+            if not discussion_group_id:
+                log.debug("No discussion group found for post comments check")
+                return VerificationResult(success=True, action_taken=None)
+
+            # Get recent messages from discussion group (these are the comments)
+            async for message in self.client.iter_messages(discussion_group_id, limit=15):
+                # Skip our own messages
+                if message.sender_id == self._our_user_id:
+                    continue
+
+                # Check if sender is a bot
+                sender = message.sender
+                if not sender or not getattr(sender, 'bot', False):
+                    continue
+
+                # Check if message looks like verification or has buttons
+                if not message.reply_markup and not self._looks_like_verification(message.text):
+                    continue
+
+                # Check if it might be for us (mentions our name, or is general verification)
+                if not self._is_message_for_us(message, None):
+                    continue
+
+                bot_username = getattr(sender, 'username', 'unknown')
+                log.info(f"Found potential verification in comments from @{bot_username}")
+
+                # Handle it
+                buttons = self._extract_buttons(message)
+                button_texts = [b["text"] for b in buttons]
+
+                # Check cache
+                cached_action = self.cache.get(
+                    bot_username,
+                    message.text or "",
+                    button_texts,
+                    self._our_username,
+                    self._our_first_name,
+                )
+
+                if cached_action:
+                    log.info(f"Using cached comment verification action: {cached_action.action_type}")
+                    success = await self._execute_action(
+                        {"type": cached_action.action_type, **cached_action.action_data},
+                        message
+                    )
+                    return VerificationResult(
+                        success=success,
+                        action_taken=cached_action.action_type,
+                        cached=True,
+                    )
+
+                # Use AI to analyze
+                analysis = await self._analyze_with_ai(message, context="post_comment_verification")
+
+                if not analysis.get("is_verification", False):
+                    continue
+
+                action = analysis.get("action", {})
+                action_type = action.get("type", "none")
+
+                log.info(f"AI suggests action for comment verification: {action_type}")
+                success = await self._execute_action(action, message)
+
+                # Cache the action
+                self.cache.set(
+                    bot_username,
+                    message.text or "",
+                    button_texts,
+                    CachedAction(
+                        action_type=action_type,
+                        action_data={k: v for k, v in action.items() if k != "type"},
+                        success_count=1 if success else 0,
+                        fail_count=0 if success else 1,
+                    ),
+                    self._our_username,
+                    self._our_first_name,
+                )
+
+                return VerificationResult(
+                    success=success,
+                    action_taken=action_type,
+                    cached=False,
+                    details={"bot": bot_username, "location": "post_comments"}
+                )
+
+            log.debug("No verification found in post comments")
+            return VerificationResult(success=True, action_taken=None)
+
+        except Exception as e:
+            log.error(f"Post comments verification check failed: {e}")
+            return VerificationResult(success=False, error=str(e))
+
     def _looks_like_verification(self, text: str | None) -> bool:
         """Check if message text looks like a verification challenge."""
         if not text:
