@@ -5,8 +5,10 @@ AI-powered verification agent using Claude to detect and solve verification chal
 import asyncio
 import hashlib
 import json
+import random
 import re
 import os
+import operator
 from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime
@@ -443,7 +445,7 @@ Respond with JSON only."""
 
         log.info(f"Clicking button: '{target_button['text']}'")
 
-        await asyncio.sleep(1 + asyncio.get_event_loop().time() % 2)  # Random delay
+        await asyncio.sleep(random.uniform(1, 3))
 
         # Click the button
         await message.click(target_button["row"], target_button["index"])
@@ -460,7 +462,7 @@ Respond with JSON only."""
 
         log.info(f"Sending message: '{text[:50]}...'")
 
-        await asyncio.sleep(1 + asyncio.get_event_loop().time() % 2)
+        await asyncio.sleep(random.uniform(1, 3))
 
         await self.client.send_message(
             message.chat_id,
@@ -484,18 +486,16 @@ Respond with JSON only."""
             log.warning("No math expression to solve")
             return False
 
-        # Safely evaluate the expression
+        # Safely evaluate the expression without using eval()
         try:
-            # Only allow basic math operations
-            allowed = set('0123456789+-*/ ()')
-            if not all(c in allowed for c in expression):
-                log.warning(f"Invalid characters in math expression: {expression}")
+            result = self._safe_math_eval(expression)
+            if result is None:
+                log.warning(f"Could not safely evaluate math expression: {expression}")
                 return False
 
-            result = eval(expression)
             log.info(f"Solved math: {expression} = {result}")
 
-            await asyncio.sleep(1 + asyncio.get_event_loop().time() % 2)
+            await asyncio.sleep(random.uniform(1, 3))
 
             await self.client.send_message(
                 message.chat_id,
@@ -508,6 +508,32 @@ Respond with JSON only."""
         except Exception as e:
             log.error(f"Failed to solve math: {e}")
             return False
+
+    def _safe_math_eval(self, expression: str) -> int | float | None:
+        """Safely evaluate a simple math expression without using eval()."""
+        # Only support simple binary operations: a op b
+        ops = {
+            '+': operator.add,
+            '-': operator.sub,
+            '*': operator.mul,
+            '/': operator.floordiv,
+        }
+
+        # Try to match pattern: number operator number
+        match = re.match(r'^\s*(\d+)\s*([+\-*/])\s*(\d+)\s*$', expression)
+        if not match:
+            return None
+
+        a, op, b = int(match.group(1)), match.group(2), int(match.group(3))
+
+        if op not in ops:
+            return None
+
+        # Protect against division by zero
+        if op == '/' and b == 0:
+            return None
+
+        return ops[op](a, b)
 
     async def _action_send_to_bot(self, action: dict) -> bool:
         """Send a message to a verification bot."""
@@ -523,7 +549,7 @@ Respond with JSON only."""
 
         log.info(f"Sending '{bot_message}' to @{bot_username}")
 
-        await asyncio.sleep(2 + asyncio.get_event_loop().time() % 3)
+        await asyncio.sleep(random.uniform(2, 5))
 
         try:
             await self.client.send_message(bot_username, bot_message)

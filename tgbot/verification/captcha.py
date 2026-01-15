@@ -3,6 +3,7 @@ import base64
 import asyncio
 import urllib.request
 import urllib.parse
+from functools import partial
 
 from ..utils.logger import setup_logger
 
@@ -22,6 +23,12 @@ class CaptchaSolver:
     def __init__(self, api_key: str | None):
         self.api_key = api_key
 
+    def _make_request(self, url: str, data: bytes | None = None, timeout: int = 30) -> dict:
+        """Make a blocking HTTP request (runs in thread pool)."""
+        req = urllib.request.Request(url, data=data) if data else url
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+
     async def solve(self, image_bytes: bytes) -> str:
         """Solve an image captcha and return the answer."""
         if not self.api_key:
@@ -39,9 +46,12 @@ class CaptchaSolver:
                 "json": 1
             }).encode()
 
-            req = urllib.request.Request(f"{self.BASE_URL}/in.php", data=submit_data)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode())
+            # Run blocking request in thread pool
+            result = await asyncio.to_thread(
+                self._make_request,
+                f"{self.BASE_URL}/in.php",
+                submit_data
+            )
 
             if result.get("status") != 1:
                 log.error(f"Captcha submit failed: {result.get('request')}")
@@ -61,8 +71,9 @@ class CaptchaSolver:
                     "json": 1
                 })
                 result_url = f"{self.BASE_URL}/res.php?{result_params}"
-                with urllib.request.urlopen(result_url, timeout=30) as resp:
-                    result = json.loads(resp.read().decode())
+
+                # Run blocking request in thread pool
+                result = await asyncio.to_thread(self._make_request, result_url)
 
                 if result.get("status") == 1:
                     log.info(f"Captcha solved: {result['request']}")

@@ -129,7 +129,7 @@ class Dispatcher:
 
         # Spawn subprocess
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "src.cli",
+            sys.executable, "-m", "tgbot.cli",
             "run-task",
             "--profile", profile,
             "--redis", self.redis_url,

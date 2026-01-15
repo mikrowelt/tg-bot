@@ -28,6 +28,8 @@ class ProxyConfig:
     def to_tuple(self) -> tuple:
         if self.username and self.password:
             return (self.type, self.host, self.port, True, self.username, self.password)
+        if self.username or self.password:
+            raise ConfigError("Proxy requires both username and password, or neither")
         return (self.type, self.host, self.port)
 
     def __str__(self) -> str:
@@ -103,10 +105,16 @@ class Config:
                 log.error(f"Invalid proxy type: {proxy_type}")
                 raise ConfigError(f"Invalid proxy type: {proxy_type}")
 
+            try:
+                proxy_port_int = int(proxy_port)
+            except ValueError:
+                log.error(f"Invalid proxy port: {proxy_port}")
+                raise ConfigError(f"Invalid proxy port (must be integer): {proxy_port}")
+
             proxy = ProxyConfig(
                 type=proxy_type_map[proxy_type],
                 host=proxy_host,
-                port=int(proxy_port),
+                port=proxy_port_int,
                 username=os.getenv("PROXY_USERNAME"),
                 password=os.getenv("PROXY_PASSWORD"),
             )

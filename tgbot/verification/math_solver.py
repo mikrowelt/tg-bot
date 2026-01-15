@@ -12,20 +12,23 @@ class MathSolver:
         (r"(\d+)\s*[\+]\s*(\d+)", "+", lambda a, b: a + b),
         (r"(\d+)\s*[\-]\s*(\d+)", "-", lambda a, b: a - b),
         (r"(\d+)\s*[\*x×]\s*(\d+)", "*", lambda a, b: a * b),
-        (r"(\d+)\s*[\/÷]\s*(\d+)", "/", lambda a, b: a // b if b != 0 else 0),
+        (r"(\d+)\s*[\/÷]\s*(\d+)", "/", lambda a, b: a // b if b != 0 else None),
     ]
 
     @classmethod
     def solve(cls, text: str) -> str | None:
         """
         Extract and solve a math problem from text.
-        Returns the answer as a string, or None if no problem found.
+        Returns the answer as a string, or None if no problem found or division by zero.
         """
         for pattern, op, operation in cls.PATTERNS:
             match = re.search(pattern, text)
             if match:
                 a, b = int(match.group(1)), int(match.group(2))
                 result = operation(a, b)
+                if result is None:
+                    log.warning(f"Math operation failed: {a} {op} {b} (division by zero)")
+                    return None
                 log.info(f"Math solved: {a} {op} {b} = {result}")
                 return str(result)
 

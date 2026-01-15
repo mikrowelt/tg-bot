@@ -1,9 +1,9 @@
-import asyncio
-import sys
+"""Change profile command."""
 
-from ..utils.config import Config, ConfigError
+from ..utils.config import Config
 from ..utils.logger import setup_logger
 from ..client import TgBot, ProfileUpdateError
+from .base import run_command
 
 log = setup_logger("tg-bot.cmd.profile")
 
@@ -15,7 +15,7 @@ async def _change_profile(
     about: str | None,
     username: str | None,
     photo: str | None,
-) -> None:
+) -> dict:
     """Internal async implementation."""
     config = Config.load(profile)
 
@@ -28,6 +28,9 @@ async def _change_profile(
             photo_path=photo,
         )
 
+    log.info("Profile update completed successfully")
+    return {"success": True}
+
 
 def change_profile(
     profile: str | None = None,
@@ -36,7 +39,7 @@ def change_profile(
     about: str | None = None,
     username: str | None = None,
     photo: str | None = None,
-) -> None:
+) -> dict | None:
     """
     Change Telegram profile information.
 
@@ -48,22 +51,15 @@ def change_profile(
         username: New username (without @)
         photo: Path to new profile photo
     """
-    try:
-        asyncio.run(_change_profile(
-            profile=profile,
-            first_name=first_name,
-            last_name=last_name,
-            about=about,
-            username=username,
-            photo=photo,
-        ))
-        log.info("Profile update completed successfully")
-    except ConfigError as e:
-        log.error(f"Configuration error: {e}")
-        sys.exit(1)
-    except ProfileUpdateError as e:
-        log.error(f"Profile update failed: {e}")
-        sys.exit(1)
-    except Exception as e:
-        log.error(f"Unexpected error: {e}")
-        sys.exit(1)
+    return run_command(
+        _change_profile,
+        error_types=(ProfileUpdateError,),
+        print_result=False,
+    )(
+        profile=profile,
+        first_name=first_name,
+        last_name=last_name,
+        about=about,
+        username=username,
+        photo=photo,
+    )

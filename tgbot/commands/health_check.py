@@ -1,10 +1,9 @@
-import asyncio
-import json
-import sys
+"""Health check command."""
 
-from ..utils.config import Config, ConfigError
+from ..utils.config import Config
 from ..utils.logger import setup_logger
 from ..client import TgBot
+from .base import run_command
 
 log = setup_logger("tg-bot.cmd.health")
 
@@ -27,13 +26,4 @@ def health_check(profile: str | None = None) -> dict | None:
     Returns:
         Health check result dict, or None on error.
     """
-    try:
-        result = asyncio.run(_health_check(profile=profile))
-        print(json.dumps(result, indent=2))
-        return result
-    except ConfigError as e:
-        log.error(f"Configuration error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        log.error(f"Health check error: {e}")
-        sys.exit(1)
+    return run_command(_health_check)(profile=profile)

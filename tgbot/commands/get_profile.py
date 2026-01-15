@@ -1,11 +1,11 @@
-import asyncio
-import base64
-import json
-import sys
+"""Get profile command."""
 
-from ..utils.config import Config, ConfigError
+import base64
+
+from ..utils.config import Config
 from ..utils.logger import setup_logger
 from ..client import TgBot
+from .base import run_command
 
 log = setup_logger("tg-bot.cmd.get_profile")
 
@@ -52,13 +52,4 @@ def get_profile(profile: str | None = None, include_photo: bool = False) -> dict
             - photo: base64 str (if include_photo) | bool (photo exists) | None
             - photo_encoding: "base64" | None
     """
-    try:
-        result = asyncio.run(_get_profile(profile=profile, include_photo=include_photo))
-        print(json.dumps(result, indent=2))
-        return result
-    except ConfigError as e:
-        log.error(f"Configuration error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        log.error(f"Get profile error: {e}")
-        sys.exit(1)
+    return run_command(_get_profile)(profile=profile, include_photo=include_photo)
