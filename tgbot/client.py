@@ -541,6 +541,35 @@ class TgBot:
 
     # ============ MESSAGE OPERATIONS ============
 
+    def _handle_send_error(self, error: Exception, context: str = "Send") -> SendResult:
+        """Handle common send/comment errors and return appropriate SendResult."""
+        if isinstance(error, (ChatWriteForbiddenError, UserBannedInChannelError)):
+            log.error(f"Banned or no write permission: {error}")
+            return SendResult(ok=False, error="banned", retryable=False)
+
+        if isinstance(error, ChannelPrivateError):
+            log.error(f"Channel is private or deleted: {error}")
+            return SendResult(ok=False, error="channel_private", retryable=False)
+
+        if isinstance(error, ChatRestrictedError):
+            log.error(f"Chat is restricted: {error}")
+            return SendResult(ok=False, error="chat_restricted", retryable=False)
+
+        if isinstance(error, ForbiddenError):
+            log.error(f"Forbidden: {error}")
+            return SendResult(ok=False, error="forbidden", retryable=False)
+
+        if isinstance(error, FloodWaitError):
+            log.warning(f"Rate limited for {error.seconds}s")
+            return SendResult(ok=False, error="flood_wait", retryable=True, wait_seconds=error.seconds)
+
+        if isinstance(error, SlowModeWaitError):
+            log.warning(f"Slow mode: wait {error.seconds}s")
+            return SendResult(ok=False, error="slow_mode", retryable=True, wait_seconds=error.seconds)
+
+        log.error(f"{context} failed: {error}")
+        return SendResult(ok=False, error=str(error), retryable=True)
+
     async def send_message(
         self,
         target: int | str,
@@ -588,63 +617,8 @@ class TgBot:
 
             return SendResult(ok=True, message_id=msg.id)
 
-        except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
-            log.error(f"Banned or no write permission: {e}")
-            return SendResult(
-                ok=False,
-                error="banned",
-                retryable=False,
-            )
-
-        except ChannelPrivateError as e:
-            log.error(f"Channel is private or deleted: {e}")
-            return SendResult(
-                ok=False,
-                error="channel_private",
-                retryable=False,
-            )
-
-        except ChatRestrictedError as e:
-            log.error(f"Chat is restricted: {e}")
-            return SendResult(
-                ok=False,
-                error="chat_restricted",
-                retryable=False,
-            )
-
-        except ForbiddenError as e:
-            log.error(f"Forbidden: {e}")
-            return SendResult(
-                ok=False,
-                error="forbidden",
-                retryable=False,
-            )
-
-        except FloodWaitError as e:
-            log.warning(f"Rate limited for {e.seconds}s")
-            return SendResult(
-                ok=False,
-                error="flood_wait",
-                retryable=True,
-                wait_seconds=e.seconds,
-            )
-
-        except SlowModeWaitError as e:
-            log.warning(f"Slow mode: wait {e.seconds}s")
-            return SendResult(
-                ok=False,
-                error="slow_mode",
-                retryable=True,
-                wait_seconds=e.seconds,
-            )
-
         except Exception as e:
-            log.error(f"Send failed: {e}")
-            return SendResult(
-                ok=False,
-                error=str(e),
-                retryable=True,
-            )
+            return self._handle_send_error(e, "Send")
 
     async def send_comment(
         self,
@@ -662,7 +636,7 @@ class TgBot:
             channel: Channel ID or username
             post_id: Post ID to comment on
             text: Comment text
-            reply_to: Message ID to reply to (for threading comments)
+            reply_to: Message ID to reply to (for threading comments within discussion)
             check_verification: Check for verification after sending
             verification_wait_seconds: How long to wait before checking
 
@@ -671,7 +645,33 @@ class TgBot:
         log.info(f"Sending comment to post {post_id} in {channel}" + (f" (reply to {reply_to})" if reply_to else ""))
         try:
             await asyncio.sleep(random.uniform(1, 3))
-            msg = await self.client.send_message(channel, text, comment_to=post_id, reply_to=reply_to)
+
+            # When reply_to is specified, we need to send directly to the discussion group
+            # because Telethon's comment_to + reply_to combination doesn't properly
+            # create reply chains within the comment thread
+            if reply_to is not None:
+                # Get the channel's linked discussion group
+                channel_entity = await self.client.get_entity(channel)
+                full_channel = await self.client(GetFullChannelRequest(channel_entity))
+
+                if not full_channel.full_chat.linked_chat_id:
+                    # No discussion group, fall back to standard comment
+                    log.warning("Channel has no linked discussion group, using standard comment")
+                    msg = await self.client.send_message(channel, text, comment_to=post_id)
+                else:
+                    # Send directly to discussion group with reply_to
+                    # The reply_to here is the message ID in the discussion group
+                    discussion_group_id = full_channel.full_chat.linked_chat_id
+                    log.info(f"Sending to discussion group {discussion_group_id} with reply_to={reply_to}")
+                    msg = await self.client.send_message(
+                        discussion_group_id,
+                        text,
+                        reply_to=reply_to
+                    )
+            else:
+                # First message in thread - use comment_to to start the thread
+                msg = await self.client.send_message(channel, text, comment_to=post_id)
+
             log.info(f"Comment sent successfully (id={msg.id})")
 
             # Check for verification after comment
@@ -698,33 +698,8 @@ class TgBot:
 
             return SendResult(ok=True, message_id=msg.id)
 
-        except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
-            log.error(f"Banned or no write permission: {e}")
-            return SendResult(ok=False, error="banned", retryable=False)
-
-        except ChannelPrivateError as e:
-            log.error(f"Channel is private or deleted: {e}")
-            return SendResult(ok=False, error="channel_private", retryable=False)
-
-        except ChatRestrictedError as e:
-            log.error(f"Chat is restricted: {e}")
-            return SendResult(ok=False, error="chat_restricted", retryable=False)
-
-        except ForbiddenError as e:
-            log.error(f"Forbidden: {e}")
-            return SendResult(ok=False, error="forbidden", retryable=False)
-
-        except FloodWaitError as e:
-            log.warning(f"Rate limited for {e.seconds}s")
-            return SendResult(ok=False, error="flood_wait", retryable=True, wait_seconds=e.seconds)
-
-        except SlowModeWaitError as e:
-            log.warning(f"Slow mode: wait {e.seconds}s")
-            return SendResult(ok=False, error="slow_mode", retryable=True, wait_seconds=e.seconds)
-
         except Exception as e:
-            log.error(f"Comment failed: {e}")
-            return SendResult(ok=False, error=str(e), retryable=True)
+            return self._handle_send_error(e, "Comment")
 
     async def verify_in_comments(self, channel: int | str, post_id: int) -> bool:
         """
