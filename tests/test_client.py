@@ -319,27 +319,40 @@ class TestTgBotSendComment:
 
         assert result.ok is True
         assert result.message_id == 888
+        # When reply_to is None, uses comment_to without reply_to parameter
         mock_telegram_client.send_message.assert_called_once_with(
-            "channel", "Nice post!", comment_to=100, reply_to=None
+            "channel", "Nice post!", comment_to=100
         )
 
     async def test_send_comment_with_reply_to(self, mock_config, mock_telegram_client):
-        """Test comment with reply_to for threading."""
+        """Test comment with reply_to for threading - sends to discussion group."""
         mock_msg = MagicMock()
         mock_msg.id = 889
         mock_telegram_client.send_message = AsyncMock(return_value=mock_msg)
+
+        # Mock get_entity to return a channel entity
+        mock_channel = MagicMock()
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_channel)
+
+        # Mock GetFullChannelRequest to return linked discussion group
+        mock_full_chat = MagicMock()
+        mock_full_chat.full_chat.linked_chat_id = 999  # Discussion group ID
+        mock_telegram_client.return_value = mock_full_chat
 
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
         with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
-            result = await bot.send_comment(
-                "channel", post_id=100, text="Reply!", reply_to=555
-            )
+            with patch("tgbot.client.GetFullChannelRequest") as mock_request:
+                mock_telegram_client.__call__ = AsyncMock(return_value=mock_full_chat)
+                result = await bot.send_comment(
+                    "channel", post_id=100, text="Reply!", reply_to=555
+                )
 
         assert result.ok is True
+        # When reply_to is set, sends to discussion group with reply_to
         mock_telegram_client.send_message.assert_called_once_with(
-            "channel", "Reply!", comment_to=100, reply_to=555
+            999, "Reply!", reply_to=555
         )
 
     async def test_send_comment_banned(self, mock_config, mock_telegram_client):

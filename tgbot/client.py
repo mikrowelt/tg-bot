@@ -25,6 +25,14 @@ from telethon.tl.types import Channel, Chat, InputPeerEmpty
 
 from .utils.config import Config
 from .utils.logger import setup_logger
+from .utils.metrics import (
+    record_channel_join,
+    record_message_sent,
+    record_rate_limit,
+    record_error,
+    record_profile_update,
+    record_verification,
+)
 from .verification import ButtonVerification
 
 # Import AI verification (optional - may not be available if anthropic not installed)
@@ -311,6 +319,7 @@ class TgBot:
                 await asyncio.sleep(random.uniform(1, 3))
                 result = await self.client(ImportChatInviteRequest(invite_hash))
                 channel_id = result.chats[0].id
+                record_channel_join("success")
                 log.info(f"Joined private channel: {channel_id}")
             else:
                 username = channel_link.split("/")[-1]
@@ -319,19 +328,25 @@ class TgBot:
                 await asyncio.sleep(random.uniform(2, 5))
                 await self.client(functions.channels.JoinChannelRequest(entity))
                 channel_id = entity.id
+                record_channel_join("success")
                 log.info(f"Joined public channel: {channel_id}")
 
         except UserAlreadyParticipantError:
             log.info("Already a member, fetching channel ID")
+            record_channel_join("already_member")
             await asyncio.sleep(random.uniform(1, 2))
             channel_id = await self._get_channel_id(channel_link)
 
         except FloodWaitError as e:
             log.error(f"Rate limited for {e.seconds}s")
+            record_channel_join("rate_limited")
+            record_rate_limit("join_channel", e.seconds)
             raise JoinChannelError(f"Rate limited: wait {e.seconds} seconds")
 
         except Exception as e:
             log.error(f"Join failed: {e}")
+            record_channel_join("error")
+            record_error(type(e).__name__, "join_channel")
             raise JoinChannelError(f"Failed to join channel: {e}")
 
         if channel_id is None:
@@ -360,6 +375,7 @@ class TgBot:
 
                 if result.action_taken:
                     log.info(f"AI verification handled: {result.action_taken} (cached: {result.cached})")
+                    record_verification("ai_channel", "success")
 
                 # Also check for verification in discussion group if we joined one
                 if discussion_group_id:
@@ -372,6 +388,7 @@ class TgBot:
 
                     if disc_result.action_taken:
                         log.info(f"Discussion group verification handled: {disc_result.action_taken} (cached: {disc_result.cached})")
+                        record_verification("ai_discussion", "success")
 
                 # Check for verification in post comments
                 log.info("Checking verification in post comments...")
@@ -383,6 +400,7 @@ class TgBot:
 
                 if comments_result.action_taken:
                     log.info(f"Post comments verification handled: {comments_result.action_taken} (cached: {comments_result.cached})")
+                    record_verification("ai_comments", "success")
 
                 # Also check for DM verification
                 dm_result = await self.ai_verification.check_dm_verification(
@@ -391,6 +409,7 @@ class TgBot:
 
                 if dm_result.action_taken:
                     log.info(f"AI DM verification handled: {dm_result.action_taken}")
+                    record_verification("ai_dm", "success")
 
             else:
                 # Fall back to legacy verification
@@ -543,31 +562,47 @@ class TgBot:
 
     def _handle_send_error(self, error: Exception, context: str = "Send") -> SendResult:
         """Handle common send/comment errors and return appropriate SendResult."""
+        operation = context.lower()
+
         if isinstance(error, (ChatWriteForbiddenError, UserBannedInChannelError)):
             log.error(f"Banned or no write permission: {error}")
+            record_message_sent("banned", operation)
+            record_error("banned", operation)
             return SendResult(ok=False, error="banned", retryable=False)
 
         if isinstance(error, ChannelPrivateError):
             log.error(f"Channel is private or deleted: {error}")
+            record_message_sent("channel_private", operation)
+            record_error("channel_private", operation)
             return SendResult(ok=False, error="channel_private", retryable=False)
 
         if isinstance(error, ChatRestrictedError):
             log.error(f"Chat is restricted: {error}")
+            record_message_sent("chat_restricted", operation)
+            record_error("chat_restricted", operation)
             return SendResult(ok=False, error="chat_restricted", retryable=False)
 
         if isinstance(error, ForbiddenError):
             log.error(f"Forbidden: {error}")
+            record_message_sent("forbidden", operation)
+            record_error("forbidden", operation)
             return SendResult(ok=False, error="forbidden", retryable=False)
 
         if isinstance(error, FloodWaitError):
             log.warning(f"Rate limited for {error.seconds}s")
+            record_message_sent("rate_limited", operation)
+            record_rate_limit(operation, error.seconds)
             return SendResult(ok=False, error="flood_wait", retryable=True, wait_seconds=error.seconds)
 
         if isinstance(error, SlowModeWaitError):
             log.warning(f"Slow mode: wait {error.seconds}s")
+            record_message_sent("slow_mode", operation)
+            record_rate_limit(f"{operation}_slow_mode", error.seconds)
             return SendResult(ok=False, error="slow_mode", retryable=True, wait_seconds=error.seconds)
 
         log.error(f"{context} failed: {error}")
+        record_message_sent("error", operation)
+        record_error(type(error).__name__, operation)
         return SendResult(ok=False, error=str(error), retryable=True)
 
     async def send_message(
@@ -601,6 +636,7 @@ class TgBot:
         try:
             await asyncio.sleep(random.uniform(1, 3))
             msg = await self.client.send_message(target, text, reply_to=reply_to)
+            record_message_sent("success", "message")
             log.info(f"Message sent successfully (id={msg.id})")
 
             # Check for verification after first message
@@ -672,6 +708,7 @@ class TgBot:
                 # First message in thread - use comment_to to start the thread
                 msg = await self.client.send_message(channel, text, comment_to=post_id)
 
+            record_message_sent("success", "comment")
             log.info(f"Comment sent successfully (id={msg.id})")
 
             # Check for verification after comment
@@ -878,6 +915,7 @@ class TgBot:
                     last_name=new_last_name,
                     about=new_about,
                 ))
+                record_profile_update("name_bio", "success")
                 log.info("Profile name/bio updated")
                 await asyncio.sleep(random.uniform(3, 7))
 
@@ -887,6 +925,7 @@ class TgBot:
                 await self.client(functions.photos.UploadProfilePhotoRequest(
                     file=await self.client.upload_file(photo_path)
                 ))
+                record_profile_update("photo", "success")
                 log.info("Profile photo updated")
                 await asyncio.sleep(random.uniform(3, 7))
 
@@ -894,13 +933,18 @@ class TgBot:
             if username is not None:
                 log.debug(f"Setting username: @{username}")
                 await self.client(UpdateUsernameRequest(username=username))
+                record_profile_update("username", "success")
                 log.info(f"Username set to @{username}")
 
         except FloodWaitError as e:
             log.error(f"Rate limited for {e.seconds}s")
+            record_profile_update("profile", "rate_limited")
+            record_rate_limit("profile_update", e.seconds)
             raise ProfileUpdateError(f"Rate limited: wait {e.seconds} seconds")
         except Exception as e:
             log.error(f"Profile update failed: {e}")
+            record_profile_update("profile", "error")
+            record_error(type(e).__name__, "profile_update")
             raise ProfileUpdateError(f"Failed to update profile: {e}")
 
     async def set_username(self, username: str, max_attempts: int = 10) -> dict:
@@ -950,6 +994,7 @@ class TgBot:
                 await self.client(UpdateUsernameRequest(username=try_username))
                 result["success"] = True
                 result["username"] = try_username
+                record_profile_update("username", "success")
                 log.info(f"Username set to @{try_username}")
                 return result
 
@@ -983,10 +1028,13 @@ class TgBot:
 
             except Exception as e:
                 result["error"] = str(e)
+                record_profile_update("username", "error")
+                record_error(type(e).__name__, "set_username")
                 log.error(f"Failed to set username: {e}")
                 return result
 
         result["error"] = f"Could not find available username after {max_attempts} attempts"
+        record_profile_update("username", "exhausted")
         log.warning(result["error"])
         return result
 
