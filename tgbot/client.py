@@ -828,6 +828,118 @@ class TgBot:
             log.error(f"Failed to get target type: {e}")
             raise TgBotError(f"Failed to get target type: {e}")
 
+    async def check_channel_membership(self, target: int | str) -> dict:
+        """
+        Check if the account is a member of a channel/group and get its type.
+
+        This method handles private channels with invite links correctly by
+        refreshing the dialogs cache if the initial lookup fails.
+
+        Args:
+            target: Channel username, ID, or invite link (t.me/+xxx)
+
+        Returns:
+            dict with:
+                - is_member: bool
+                - target_type: "channel" | "supergroup" | "group" | None
+                - channel_id: int | None (the resolved channel ID)
+                - error: str | None (error message if not a member)
+        """
+        result = {
+            "is_member": False,
+            "target_type": None,
+            "channel_id": None,
+            "error": None,
+        }
+
+        # First try direct entity lookup (works for public channels and cached entities)
+        try:
+            entity = await self.client.get_entity(target)
+
+            if isinstance(entity, Channel):
+                result["is_member"] = True
+                result["channel_id"] = entity.id
+                result["target_type"] = "channel" if entity.broadcast else "supergroup"
+            elif isinstance(entity, Chat):
+                result["is_member"] = True
+                result["channel_id"] = entity.id
+                result["target_type"] = "group"
+            else:
+                result["is_member"] = True
+                result["channel_id"] = getattr(entity, 'id', None)
+                result["target_type"] = "unknown"
+
+            return result
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "not part of" not in error_msg and "cannot get entity" not in error_msg:
+                # Some other error - not a membership issue
+                result["error"] = str(e)
+                return result
+
+        # Direct lookup failed - refresh dialogs and try to find the channel
+        log.info(f"Direct lookup failed for {target}, refreshing dialogs cache...")
+
+        try:
+            # Refresh dialogs to populate session cache
+            async for dialog in self.client.iter_dialogs():
+                entity = dialog.entity
+
+                # Check if this is the target we're looking for
+                if isinstance(entity, (Channel, Chat)):
+                    # Match by ID if target is numeric
+                    if isinstance(target, int) and entity.id == target:
+                        result["is_member"] = True
+                        result["channel_id"] = entity.id
+                        if isinstance(entity, Channel):
+                            result["target_type"] = "channel" if entity.broadcast else "supergroup"
+                        else:
+                            result["target_type"] = "group"
+                        return result
+
+                    # Match by username
+                    if isinstance(target, str):
+                        username = getattr(entity, 'username', None)
+                        if username and target.lower().lstrip('@') == username.lower():
+                            result["is_member"] = True
+                            result["channel_id"] = entity.id
+                            if isinstance(entity, Channel):
+                                result["target_type"] = "channel" if entity.broadcast else "supergroup"
+                            else:
+                                result["target_type"] = "group"
+                            return result
+
+            # After refreshing dialogs, try get_entity again
+            # (the entity should now be in the session cache)
+            try:
+                entity = await self.client.get_entity(target)
+
+                if isinstance(entity, Channel):
+                    result["is_member"] = True
+                    result["channel_id"] = entity.id
+                    result["target_type"] = "channel" if entity.broadcast else "supergroup"
+                elif isinstance(entity, Chat):
+                    result["is_member"] = True
+                    result["channel_id"] = entity.id
+                    result["target_type"] = "group"
+                else:
+                    result["is_member"] = True
+                    result["channel_id"] = getattr(entity, 'id', None)
+                    result["target_type"] = "unknown"
+
+                return result
+
+            except Exception as e2:
+                log.warning(f"Still cannot resolve {target} after dialog refresh: {e2}")
+                result["error"] = f"Not a member of target channel (checked via dialogs)"
+                return result
+
+        except Exception as e:
+            log.error(f"Error refreshing dialogs: {e}")
+            result["error"] = f"Cannot verify membership: {e}"
+            return result
+
     async def get_latest_post(self, channel: int | str, with_comments: bool = True) -> dict | None:
         """
         Get the latest post from a broadcast channel.
