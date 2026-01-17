@@ -1584,9 +1584,13 @@ class TgBot:
                     full_channel = await self.client(GetFullChannelRequest(entity))
                     result["description"] = getattr(full_channel.full_chat, 'about', None)
                     result["member_count"] = getattr(full_channel.full_chat, 'participants_count', None)
+                    # Check if channel has linked discussion group (comments enabled)
+                    linked_chat_id = getattr(full_channel.full_chat, 'linked_chat_id', None)
+                    result["comments_enabled"] = linked_chat_id is not None
                 except Exception as e:
                     log.warning(f"Could not get full channel info: {e}")
                     result["member_count"] = getattr(entity, 'participants_count', None)
+                    result["comments_enabled"] = None  # Unknown
 
                 # Get recent posts for broadcast channels
                 if entity.broadcast:
