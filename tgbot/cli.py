@@ -9,6 +9,7 @@ Usage:
     tg-bot change-profile [options]
     tg-bot join-channel <channel> [options]
     tg-bot send-message <target> <text> [options]
+    tg-bot check-ban <target> [options]
     tg-bot worker --profiles <profiles> [options]
     tg-bot run-task --profile <profile> [options]
 """
@@ -19,6 +20,7 @@ import sys
 
 from .commands import (
     change_profile,
+    check_ban,
     get_profile,
     health_check,
     join_channel,
@@ -143,6 +145,21 @@ def create_parser() -> argparse.ArgumentParser:
         help="Message ID to reply to",
     )
 
+    # check-ban command
+    ban_parser = subparsers.add_parser(
+        "check-ban",
+        help="Check if account is banned from a channel/group",
+    )
+    ban_parser.add_argument(
+        "target",
+        help="Target chat (@username, channel ID, or link)",
+    )
+    ban_parser.add_argument(
+        "--test-message", "-t",
+        action="store_true",
+        help="Send a test message to verify write access (will be deleted)",
+    )
+
     # worker command (dispatcher)
     worker_parser = subparsers.add_parser(
         "worker",
@@ -257,6 +274,17 @@ def main() -> None:
             reply_to=args.reply_to,
         )
         sys.exit(0 if result and result.ok else 1)
+
+    elif args.command == "check-ban":
+        result = check_ban(
+            target=args.target,
+            profile=args.profile,
+            test_message=args.test_message,
+        )
+        # Exit 0 if not banned, 1 if banned or error
+        if result:
+            sys.exit(1 if result.get("is_banned") else 0)
+        sys.exit(1)
 
     elif args.command == "worker":
         from .worker import run_dispatcher, discover_profiles
