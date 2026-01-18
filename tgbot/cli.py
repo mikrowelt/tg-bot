@@ -10,6 +10,7 @@ Usage:
     tg-bot join-channel <channel> [options]
     tg-bot send-message <target> <text> [options]
     tg-bot check-ban <target> [options]
+    tg-bot check-all-bans <channels>... [options]
     tg-bot worker --profiles <profiles> [options]
     tg-bot run-task --profile <profile> [options]
 """
@@ -20,6 +21,7 @@ import sys
 
 from .commands import (
     change_profile,
+    check_all_bans,
     check_ban,
     get_profile,
     health_check,
@@ -160,6 +162,22 @@ def create_parser() -> argparse.ArgumentParser:
         help="Send a test message to verify write access (will be deleted)",
     )
 
+    # check-all-bans command
+    all_bans_parser = subparsers.add_parser(
+        "check-all-bans",
+        help="Check ban status across multiple channels",
+    )
+    all_bans_parser.add_argument(
+        "channels",
+        nargs="+",
+        help="Channel targets (@username, channel ID, or link)",
+    )
+    all_bans_parser.add_argument(
+        "--no-test-message",
+        action="store_true",
+        help="Skip test messages (only check membership, not write access)",
+    )
+
     # worker command (dispatcher)
     worker_parser = subparsers.add_parser(
         "worker",
@@ -284,6 +302,17 @@ def main() -> None:
         # Exit 0 if not banned, 1 if banned or error
         if result:
             sys.exit(1 if result.get("is_banned") else 0)
+        sys.exit(1)
+
+    elif args.command == "check-all-bans":
+        result = check_all_bans(
+            channels=args.channels,
+            profile=args.profile,
+            test_message=not args.no_test_message,
+        )
+        # Exit 0 if no bans, 1 if any bans or error
+        if result:
+            sys.exit(1 if result.get("banned_count", 0) > 0 else 0)
         sys.exit(1)
 
     elif args.command == "worker":

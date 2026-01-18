@@ -1,4 +1,5 @@
 from .change_profile import change_profile
+from .check_all_bans import check_all_bans
 from .check_ban import check_ban
 from .get_profile import get_profile
 from .health_check import health_check
@@ -8,6 +9,7 @@ from .send_message import send_message
 
 __all__ = [
     "change_profile",
+    "check_all_bans",
     "check_ban",
     "get_profile",
     "health_check",
