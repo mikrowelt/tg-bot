@@ -13,6 +13,7 @@ Usage:
     tg-bot check-all-bans <channels>... [options]
     tg-bot worker --profiles <profiles> [options]
     tg-bot run-task --profile <profile> [options]
+    tg-bot listen [options]
 """
 import argparse
 import asyncio
@@ -232,6 +233,41 @@ def create_parser() -> argparse.ArgumentParser:
         help="Seconds to wait for a task (default: 5)",
     )
 
+    # listen command
+    listen_parser = subparsers.add_parser(
+        "listen",
+        help="Listen to messages in groups and publish to Redis stream",
+    )
+    listen_parser.add_argument(
+        "--groups",
+        help="Comma-separated list of group IDs to listen to (listens to all if not specified)",
+    )
+    listen_parser.add_argument(
+        "--listener-id",
+        help="Unique listener ID (auto-generated if not specified)",
+    )
+    listen_parser.add_argument(
+        "--account-id",
+        type=int,
+        help="Account ID in database (for heartbeat tracking)",
+    )
+    listen_parser.add_argument(
+        "--redis",
+        default=os.getenv("REDIS_URL", "redis://localhost:6379"),
+        help="Redis URL (default: REDIS_URL env var or redis://localhost:6379)",
+    )
+    listen_parser.add_argument(
+        "--heartbeat-interval",
+        type=int,
+        default=10,
+        help="Heartbeat interval in seconds (default: 10)",
+    )
+    listen_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print messages to stdout for debugging",
+    )
+
     return parser
 
 
@@ -353,6 +389,53 @@ def main() -> None:
             timeout=args.timeout,
         )
         sys.exit(exit_code)
+
+    elif args.command == "listen":
+        from .listener import Listener, MessageStream, HeartbeatManager
+        from .utils.config import Config
+
+        # Load config
+        config = Config.load(args.profile)
+
+        # Initialize Redis connections
+        message_stream = MessageStream(args.redis)
+        heartbeat_manager = HeartbeatManager(args.redis)
+
+        # Parse groups if specified
+        group_ids = []
+        if args.groups:
+            group_ids = [int(g.strip()) for g in args.groups.split(",")]
+
+        # Optional debug callback
+        def debug_callback(msg):
+            if args.debug:
+                print(f"[{msg.listener_id}] {msg.discussion_group_id}: @{msg.sender_username}: {msg.text[:100]}")
+
+        # Create listener
+        listener = Listener(
+            config=config,
+            message_stream=message_stream,
+            heartbeat_manager=heartbeat_manager,
+            listener_id=args.listener_id,
+            account_id=args.account_id,
+            heartbeat_interval=args.heartbeat_interval,
+            on_message=debug_callback if args.debug else None,
+        )
+
+        if group_ids:
+            listener.assign_groups(group_ids)
+
+        try:
+            print(f"Starting listener {listener.listener_id} for profile {config.profile}...")
+            asyncio.run(listener.run_with_signal_handling())
+        except KeyboardInterrupt:
+            print("\nListener stopped")
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        finally:
+            message_stream.close()
+            heartbeat_manager.close()
 
 
 if __name__ == "__main__":
