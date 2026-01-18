@@ -642,7 +642,13 @@ Respond with JSON only."""
                 self._our_first_name,
             )
 
-            if cached_action:
+            # Don't use cached answers for math problems - the numbers change!
+            use_cache = cached_action and not (
+                cached_action.action_type == "send_message" and
+                self._looks_like_math(verification_message.text)
+            )
+
+            if use_cache:
                 log.info(f"Using cached action: {cached_action.action_type}")
                 success = await self._execute_action(
                     {"type": cached_action.action_type, **cached_action.action_data},
@@ -665,6 +671,9 @@ Respond with JSON only."""
                     cached=True,
                     details={"bot": bot_username}
                 )
+
+            if cached_action:
+                log.info("Math problem detected, solving fresh instead of using cached answer")
 
             # Use AI to analyze
             log.info("Using AI to analyze verification...")
@@ -845,7 +854,13 @@ Respond with JSON only."""
                     self._our_first_name,
                 )
 
-                if cached_action:
+                # Don't use cached answers for math problems - the numbers change!
+                use_cache = cached_action and not (
+                    cached_action.action_type == "send_message" and
+                    self._looks_like_math(message.text)
+                )
+
+                if use_cache:
                     log.info(f"Using cached comment verification action: {cached_action.action_type}")
                     success = await self._execute_action(
                         {"type": cached_action.action_type, **cached_action.action_data},
@@ -856,6 +871,9 @@ Respond with JSON only."""
                         action_taken=cached_action.action_type,
                         cached=True,
                     )
+
+                if cached_action:
+                    log.info("Math problem in comments, solving fresh instead of using cached answer")
 
                 # Use AI to analyze
                 analysis = await self._analyze_with_ai(message, context="post_comment_verification")
@@ -915,6 +933,15 @@ Respond with JSON only."""
 
         return any(kw in text_lower for kw in verification_keywords)
 
+    def _looks_like_math(self, text: str | None) -> bool:
+        """Check if message text contains a math problem that needs solving."""
+        if not text:
+            return False
+
+        # Match patterns like: 4 + 9, (4 + 9), solve 4+9, etc.
+        math_pattern = r'\d+\s*[+\-*/×÷]\s*\d+'
+        return bool(re.search(math_pattern, text))
+
     async def _handle_dm_verification(self, message: Message, bot: User) -> VerificationResult:
         """Handle a verification DM from a bot."""
         buttons = self._extract_buttons(message)
@@ -929,7 +956,13 @@ Respond with JSON only."""
             self._our_first_name,
         )
 
-        if cached_action:
+        # Don't use cached answers for math problems - the numbers change!
+        use_cache = cached_action and not (
+            cached_action.action_type == "send_message" and
+            self._looks_like_math(message.text)
+        )
+
+        if use_cache:
             log.info(f"Using cached DM action: {cached_action.action_type}")
             success = await self._execute_action(
                 {"type": cached_action.action_type, **cached_action.action_data},
@@ -940,6 +973,9 @@ Respond with JSON only."""
                 action_taken=cached_action.action_type,
                 cached=True,
             )
+
+        if cached_action:
+            log.info("Math problem in DM, solving fresh instead of using cached answer")
 
         # Use AI
         analysis = await self._analyze_with_ai(message, context="DM verification")
