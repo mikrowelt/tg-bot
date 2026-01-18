@@ -142,13 +142,17 @@ class Listener:
             print(f"[{self.listener_id}] >>> Received message from chat_id={chat_id}")
 
             # Filter by assigned groups if specified
-            if self._assigned_groups:
-                # Extract supergroup ID from -100XXXXXXXXXX format
-                raw_id = abs(chat_id) if chat_id else 0
-                supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
-
-                if supergroup_id not in self._assigned_groups:
-                    return  # Message from unmonitored group
+            # NOTE: Filtering is temporarily disabled to capture all messages
+            # including from discussion groups. The discussion_group_id is not
+            # always populated in the channels table.
+            # TODO: Re-enable filtering once discussion_group_id is properly tracked
+            # if self._assigned_groups:
+            #     # Extract supergroup ID from -100XXXXXXXXXX format
+            #     raw_id = abs(chat_id) if chat_id else 0
+            #     supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
+            #
+            #     if supergroup_id not in self._assigned_groups:
+            #         return  # Message from unmonitored group
 
             # Skip messages without text
             if not message.text:
