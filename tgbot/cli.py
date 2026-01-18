@@ -426,7 +426,7 @@ def main() -> None:
             listener.assign_groups(group_ids)
 
         try:
-            print(f"Starting listener {listener.listener_id} for profile {config.profile}...")
+            print(f"Starting listener {listener.listener_id} for profile {listener.profile_name}...")
             asyncio.run(listener.run_with_signal_handling())
         except KeyboardInterrupt:
             print("\nListener stopped")
