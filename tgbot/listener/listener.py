@@ -141,9 +141,14 @@ class Listener:
             # Log all incoming messages for debugging
             print(f"[{self.listener_id}] >>> Received message from chat_id={chat_id}")
 
-            # Temporarily disabled filtering for debugging - capture ALL messages
-            # TODO: Re-enable filtering once basic functionality confirmed
-            print(f"[{self.listener_id}] Processing message from chat_id={chat_id} (filtering disabled for debug)")
+            # Filter by assigned groups if specified
+            if self._assigned_groups:
+                # Extract supergroup ID from -100XXXXXXXXXX format
+                raw_id = abs(chat_id) if chat_id else 0
+                supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
+
+                if supergroup_id not in self._assigned_groups:
+                    return  # Message from unmonitored group
 
             # Skip messages without text
             if not message.text:
