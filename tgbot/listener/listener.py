@@ -141,16 +141,9 @@ class Listener:
             # Log all incoming messages for debugging
             print(f"[{self.listener_id}] >>> Received message from chat_id={chat_id}")
 
-            # Filter by assigned groups if specified
-            if self._assigned_groups:
-                # Check both raw ID and extracted supergroup ID
-                raw_id = abs(chat_id) if chat_id else 0
-                # Extract supergroup ID from -100XXXXXXXXXX format
-                supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
-
-                if chat_id not in self._assigned_groups and raw_id not in self._assigned_groups and supergroup_id not in self._assigned_groups:
-                    logger.debug(f"[{self.listener_id}] Skipping message from chat_id={chat_id} (not in assigned groups: {self._assigned_groups})")
-                    return
+            # Temporarily disabled filtering for debugging - capture ALL messages
+            # TODO: Re-enable filtering once basic functionality confirmed
+            print(f"[{self.listener_id}] Processing message from chat_id={chat_id} (filtering disabled for debug)")
 
             # Skip messages without text
             if not message.text:
