@@ -116,6 +116,7 @@ class Listener:
 
     def _register_handler(self):
         """Register the message event handler."""
+        print(f"[{self.listener_id}] Registering message handler...")
         client = self._bot.client
 
         # Remove existing handler if any
@@ -125,12 +126,11 @@ class Listener:
             pass  # Handler wasn't registered
 
         # Add handler - we filter in _on_new_message instead for better debugging
-        # Using incoming=True to only capture messages from others, not our own
         client.add_event_handler(
             self._on_new_message,
             events.NewMessage()
         )
-        logger.info(f"[{self.listener_id}] Registered handler for all messages (filtering {len(self._assigned_groups)} groups in handler)")
+        print(f"[{self.listener_id}] Handler registered for all messages, filtering groups: {self._assigned_groups}")
 
     async def _on_new_message(self, event: events.NewMessage.Event):
         """Handle incoming messages."""
@@ -139,7 +139,7 @@ class Listener:
             chat_id = event.chat_id
 
             # Log all incoming messages for debugging
-            logger.debug(f"[{self.listener_id}] Received message from chat_id={chat_id}")
+            print(f"[{self.listener_id}] >>> Received message from chat_id={chat_id}")
 
             # Filter by assigned groups if specified
             if self._assigned_groups:
