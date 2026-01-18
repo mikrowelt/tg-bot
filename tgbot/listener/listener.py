@@ -105,9 +105,20 @@ class Listener:
         Assign specific groups to listen to.
 
         If empty, listens to all groups the account is part of.
+        Converts positive IDs to proper Telegram supergroup format (-100XXXXXXXXXX).
         """
-        self._assigned_groups = set(group_ids)
-        logger.info(f"[{self.listener_id}] Assigned {len(group_ids)} groups to listen to")
+        # Convert positive IDs to proper Telegram chat ID format
+        # Supergroups and channels use -100 prefix
+        converted_ids = set()
+        for gid in group_ids:
+            if gid > 0:
+                # Convert to supergroup format: -100 + id
+                converted_ids.add(-1000000000000 - gid)
+            else:
+                converted_ids.add(gid)
+
+        self._assigned_groups = converted_ids
+        logger.info(f"[{self.listener_id}] Assigned {len(group_ids)} groups: {list(converted_ids)}")
 
         # Re-register handler with new filter if already running
         if self._bot and self._bot._client and self._bot._client.is_connected():
