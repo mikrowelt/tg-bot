@@ -56,9 +56,14 @@ class Listener:
             raise RuntimeError("Bot not initialized. Call start() first.")
         return self._bot
 
+    @property
+    def profile_name(self) -> str:
+        """Get profile name from config path."""
+        return self.config.session_path.name
+
     async def start(self) -> bool:
         """Start the listener - connect to Telegram."""
-        logger.info(f"[{self.listener_id}] Starting listener for profile: {self.config.profile}")
+        logger.info(f"[{self.listener_id}] Starting listener for profile: {self.profile_name}")
 
         try:
             self._bot = TgBot(self.config)
@@ -194,7 +199,7 @@ class Listener:
                 self.heartbeat_manager.send_heartbeat(
                     listener_id=self.listener_id,
                     account_id=self.account_id,
-                    profile_name=self.config.profile,
+                    profile_name=self.profile_name,
                     channel_count=len(self._assigned_groups),
                     messages_received=self._messages_received,
                     status="listening",
@@ -265,7 +270,7 @@ class Listener:
         """Get current listener stats."""
         return {
             "listener_id": self.listener_id,
-            "profile_name": self.config.profile,
+            "profile_name": self.profile_name,
             "account_id": self.account_id,
             "running": self._running,
             "groups_count": len(self._assigned_groups),
