@@ -105,20 +105,10 @@ class Listener:
         Assign specific groups to listen to.
 
         If empty, listens to all groups the account is part of.
-        Converts positive IDs to proper Telegram supergroup format (-100XXXXXXXXXX).
+        Telethon accepts raw IDs - it handles the -100 prefix conversion internally.
         """
-        # Convert positive IDs to proper Telegram chat ID format
-        # Supergroups and channels use -100 prefix
-        converted_ids = set()
-        for gid in group_ids:
-            if gid > 0:
-                # Convert to supergroup format: -100 + id
-                converted_ids.add(-1000000000000 - gid)
-            else:
-                converted_ids.add(gid)
-
-        self._assigned_groups = converted_ids
-        logger.info(f"[{self.listener_id}] Assigned {len(group_ids)} groups: {list(converted_ids)}")
+        self._assigned_groups = set(group_ids)
+        logger.info(f"[{self.listener_id}] Assigned {len(group_ids)} groups: {list(group_ids)}")
 
         # Re-register handler with new filter if already running
         if self._bot and self._bot._client and self._bot._client.is_connected():
@@ -134,25 +124,33 @@ class Listener:
         except ValueError:
             pass  # Handler wasn't registered
 
-        # Add handler with group filter if specified
-        if self._assigned_groups:
-            client.add_event_handler(
-                self._on_new_message,
-                events.NewMessage(chats=list(self._assigned_groups))
-            )
-            logger.debug(f"[{self.listener_id}] Registered handler for {len(self._assigned_groups)} groups")
-        else:
-            # Listen to all incoming messages
-            client.add_event_handler(
-                self._on_new_message,
-                events.NewMessage(incoming=True)
-            )
-            logger.debug(f"[{self.listener_id}] Registered handler for all incoming messages")
+        # Add handler - we filter in _on_new_message instead for better debugging
+        # Using incoming=True to only capture messages from others, not our own
+        client.add_event_handler(
+            self._on_new_message,
+            events.NewMessage()
+        )
+        logger.info(f"[{self.listener_id}] Registered handler for all messages (filtering {len(self._assigned_groups)} groups in handler)")
 
     async def _on_new_message(self, event: events.NewMessage.Event):
         """Handle incoming messages."""
         try:
             message: Message = event.message
+            chat_id = event.chat_id
+
+            # Log all incoming messages for debugging
+            logger.debug(f"[{self.listener_id}] Received message from chat_id={chat_id}")
+
+            # Filter by assigned groups if specified
+            if self._assigned_groups:
+                # Check both raw ID and extracted supergroup ID
+                raw_id = abs(chat_id) if chat_id else 0
+                # Extract supergroup ID from -100XXXXXXXXXX format
+                supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
+
+                if chat_id not in self._assigned_groups and raw_id not in self._assigned_groups and supergroup_id not in self._assigned_groups:
+                    logger.debug(f"[{self.listener_id}] Skipping message from chat_id={chat_id} (not in assigned groups: {self._assigned_groups})")
+                    return
 
             # Skip messages without text
             if not message.text:
