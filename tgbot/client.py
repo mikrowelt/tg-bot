@@ -19,6 +19,8 @@ from telethon.errors import (
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest, GetAuthorizationsRequest, ResetAuthorizationRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest, GetDialogsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.functions.messages import SendReactionRequest, GetMessagesViewsRequest
+from telethon.tl.types import ReactionEmoji
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest
 from telethon.tl.types import Channel, Chat, InputPeerEmpty
@@ -982,6 +984,85 @@ class TgBot:
         except Exception as e:
             log.error(f"Failed to get latest post: {e}")
             raise TgBotError(f"Failed to get latest post: {e}")
+
+    async def send_reaction(
+        self,
+        channel: int | str,
+        message_id: int,
+        emoji: str = "👍",
+    ) -> SendResult:
+        """
+        Send a reaction to a channel post.
+
+        Args:
+            channel: Channel ID or username
+            message_id: Post ID to react to
+            emoji: Emoji to react with (default: 👍)
+
+        Returns:
+            SendResult with ok=True if successful
+        """
+        log.info(f"Sending reaction {emoji} to message {message_id} in {channel}")
+        try:
+            await asyncio.sleep(random.uniform(1, 3))
+            entity = await self.client.get_entity(channel)
+
+            # Send the reaction
+            await self.client(SendReactionRequest(
+                peer=entity,
+                msg_id=message_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            ))
+
+            log.info(f"Reaction {emoji} sent successfully to message {message_id}")
+            return SendResult(ok=True, message_id=message_id)
+
+        except FloodWaitError as e:
+            log.warning(f"Rate limited for {e.seconds}s while sending reaction")
+            return SendResult(ok=False, error="flood_wait", retryable=True, wait_seconds=e.seconds)
+
+        except Exception as e:
+            log.error(f"Failed to send reaction: {e}")
+            return SendResult(ok=False, error=str(e), retryable=True)
+
+    async def get_recent_posts(
+        self,
+        channel: int | str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """
+        Get recent posts from a channel for warmup activities.
+
+        Args:
+            channel: Channel ID or username
+            limit: Number of posts to fetch
+
+        Returns:
+            List of dicts with post info: [{id, text, date, views}, ...]
+        """
+        log.info(f"Getting {limit} recent posts from: {channel}")
+        try:
+            entity = await self.client.get_entity(channel)
+            posts = []
+
+            async for message in self.client.iter_messages(entity, limit=limit):
+                # Skip service messages
+                if message.action is not None:
+                    continue
+
+                posts.append({
+                    "id": message.id,
+                    "text": (message.text or "")[:200],
+                    "date": message.date.isoformat() if message.date else None,
+                    "views": getattr(message, 'views', None),
+                })
+
+            log.info(f"Found {len(posts)} posts in {channel}")
+            return posts
+
+        except Exception as e:
+            log.error(f"Failed to get recent posts: {e}")
+            raise TgBotError(f"Failed to get recent posts: {e}")
 
     # ============ PROFILE OPERATIONS ============
 
