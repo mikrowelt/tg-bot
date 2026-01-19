@@ -163,10 +163,36 @@ class Listener:
             sender_id = sender.id if sender else None
             sender_username = getattr(sender, 'username', None)
 
-            # Check if this is a reply
+            # Extract reply and topic info
             reply_to_msg_id = None
+            topic_id = None
+            is_forum_topic = False
+
             if message.reply_to:
                 reply_to_msg_id = message.reply_to.reply_to_msg_id
+                # Forum topic support: reply_to_top_id is the topic ID
+                topic_id = getattr(message.reply_to, 'reply_to_top_id', None)
+                # forum_topic flag indicates if this is in a forum topic
+                is_forum_topic = getattr(message.reply_to, 'forum_topic', False)
+
+            # Determine chat type from entity
+            chat_type = None
+            try:
+                chat = await event.get_chat()
+                if chat:
+                    from telethon.tl.types import Channel, Chat
+                    if isinstance(chat, Channel):
+                        if getattr(chat, 'broadcast', False):
+                            chat_type = "channel"
+                        else:
+                            chat_type = "supergroup"
+                            # Check if supergroup has forum mode enabled
+                            if getattr(chat, 'forum', False):
+                                is_forum_topic = True  # All messages in forum groups are in topics
+                    elif isinstance(chat, Chat):
+                        chat_type = "group"
+            except Exception as e:
+                logger.debug(f"Could not determine chat type: {e}")
 
             # Get chat/group info
             chat_id = event.chat_id
@@ -184,6 +210,9 @@ class Listener:
                 reply_to_msg_id=reply_to_msg_id,
                 discussion_group_id=chat_id,
                 listener_id=self.listener_id,
+                topic_id=topic_id,
+                is_forum_topic=is_forum_topic,
+                chat_type=chat_type,
             )
 
             # Publish to Redis stream

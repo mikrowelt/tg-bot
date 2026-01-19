@@ -612,17 +612,19 @@ class TgBot:
         target: int | str,
         text: str,
         reply_to: int | None = None,
+        topic_id: int | None = None,
         check_verification: bool = False,
         verification_wait_seconds: float = 3.0,
     ) -> SendResult:
         """
         Send a message to a chat, channel, or user.
-        Can also reply to a specific message.
+        Can also reply to a specific message or send to a forum topic.
 
         Args:
             target: Chat/channel/user ID or username
             text: Message text
             reply_to: Message ID to reply to
+            topic_id: Forum topic ID (for supergroups with forum mode). If set, sends to this topic.
             check_verification: Check for verification after sending (for first message)
             verification_wait_seconds: How long to wait before checking
 
@@ -632,12 +634,23 @@ class TgBot:
             - error: Error message (if not ok)
             - retryable: False for permanent errors (banned, no permissions)
             - wait_seconds: Seconds to wait before retry (for rate limits)
+
+        Note: For forum supergroups, you must specify topic_id to send to a specific topic.
+              The General topic typically has ID=1.
         """
-        log.info(f"Sending message to: {target}")
+        log.info(f"Sending message to: {target}" + (f" (topic={topic_id})" if topic_id else ""))
         log.debug(f"Message text: {text[:50]}{'...' if len(text) > 50 else ''}")
         try:
             await asyncio.sleep(random.uniform(1, 3))
-            msg = await self.client.send_message(target, text, reply_to=reply_to)
+
+            # For forum topics, use reply_to with the topic ID
+            # Telethon handles this by sending to the topic's thread
+            if topic_id and not reply_to:
+                # When sending to a topic without replying to a specific message,
+                # use the topic_id as reply_to - Telethon routes it to the topic
+                msg = await self.client.send_message(target, text, reply_to=topic_id)
+            else:
+                msg = await self.client.send_message(target, text, reply_to=reply_to)
             record_message_sent("success", "message")
             log.info(f"Message sent successfully (id={msg.id})")
 
@@ -668,10 +681,12 @@ class TgBot:
         verification_wait_seconds: float = 3.0,
     ) -> SendResult:
         """
-        Send a comment to a channel post.
+        Send a comment to a channel post (broadcast channels only).
+
+        For supergroups and regular groups, use send_message() instead.
 
         Args:
-            channel: Channel ID or username
+            channel: Channel ID or username (must be a broadcast channel)
             post_id: Post ID to comment on
             text: Comment text
             reply_to: Message ID to reply to (for threading comments within discussion)
@@ -682,6 +697,15 @@ class TgBot:
         """
         log.info(f"Sending comment to post {post_id} in {channel}" + (f" (reply to {reply_to})" if reply_to else ""))
         try:
+            # Verify target is a broadcast channel (comments only work on broadcast channels)
+            target_type = await self.get_target_type(channel)
+            if target_type != "channel":
+                log.warning(f"Target {channel} is a {target_type}, not a broadcast channel. Comments only work on broadcast channels. Use send_message() for groups/supergroups.")
+                return SendResult(
+                    ok=False,
+                    error=f"comments_not_supported: Target is a {target_type}, not a broadcast channel",
+                    retryable=False
+                )
             await asyncio.sleep(random.uniform(1, 3))
 
             # When reply_to is specified, we need to send directly to the discussion group
@@ -1063,6 +1087,119 @@ class TgBot:
         except Exception as e:
             log.error(f"Failed to get recent posts: {e}")
             raise TgBotError(f"Failed to get recent posts: {e}")
+
+    async def get_forum_topics(
+        self,
+        channel: int | str,
+        limit: int = 100,
+    ) -> list[dict]:
+        """
+        Get forum topics from a supergroup with forum mode enabled.
+
+        Args:
+            channel: Supergroup ID or username
+            limit: Maximum number of topics to fetch
+
+        Returns:
+            List of dicts with topic info:
+            [
+                {
+                    "id": int,  # Topic ID (use as topic_id in send_message)
+                    "title": str,
+                    "icon_emoji_id": int | None,
+                    "is_general": bool,  # True for the General topic
+                    "is_closed": bool,
+                    "is_hidden": bool,
+                }
+            ]
+
+        Raises:
+            TgBotError: If the target is not a forum supergroup
+        """
+        from telethon.tl.functions.channels import GetForumTopicsRequest
+
+        log.info(f"Getting forum topics from: {channel}")
+        try:
+            entity = await self.client.get_entity(channel)
+
+            # Verify it's a forum supergroup
+            if not isinstance(entity, Channel) or entity.broadcast:
+                raise TgBotError(f"Target {channel} is not a supergroup")
+            if not getattr(entity, 'forum', False):
+                raise TgBotError(f"Supergroup {channel} does not have forum mode enabled")
+
+            # Get forum topics
+            result = await self.client(GetForumTopicsRequest(
+                channel=entity,
+                offset_date=0,
+                offset_id=0,
+                offset_topic=0,
+                limit=limit,
+            ))
+
+            topics = []
+            for topic in result.topics:
+                topics.append({
+                    "id": topic.id,
+                    "title": topic.title,
+                    "icon_emoji_id": getattr(topic, 'icon_emoji_id', None),
+                    "is_general": getattr(topic, 'short', False),  # General topic has 'short' flag
+                    "is_closed": getattr(topic, 'closed', False),
+                    "is_hidden": getattr(topic, 'hidden', False),
+                })
+
+            log.info(f"Found {len(topics)} forum topics in {channel}")
+            return topics
+
+        except TgBotError:
+            raise
+        except Exception as e:
+            log.error(f"Failed to get forum topics: {e}")
+            raise TgBotError(f"Failed to get forum topics: {e}")
+
+    async def get_recent_messages_in_topic(
+        self,
+        channel: int | str,
+        topic_id: int,
+        limit: int = 10,
+    ) -> list[dict]:
+        """
+        Get recent messages from a specific forum topic.
+
+        Args:
+            channel: Supergroup ID or username
+            topic_id: Forum topic ID
+            limit: Number of messages to fetch
+
+        Returns:
+            List of dicts with message info: [{id, text, date, sender_id, sender_username}, ...]
+        """
+        log.info(f"Getting {limit} recent messages from topic {topic_id} in {channel}")
+        try:
+            entity = await self.client.get_entity(channel)
+            messages = []
+
+            # Use reply_to parameter to filter messages in a specific topic
+            async for message in self.client.iter_messages(entity, limit=limit, reply_to=topic_id):
+                # Skip service messages
+                if message.action is not None:
+                    continue
+
+                sender = await message.get_sender() if message.sender_id else None
+                messages.append({
+                    "id": message.id,
+                    "text": (message.text or "")[:200],
+                    "date": message.date.isoformat() if message.date else None,
+                    "sender_id": message.sender_id,
+                    "sender_username": getattr(sender, 'username', None) if sender else None,
+                })
+
+            log.info(f"Found {len(messages)} messages in topic {topic_id}")
+            return messages
+
+        except Exception as e:
+            log.error(f"Failed to get messages from topic: {e}")
+            raise TgBotError(f"Failed to get messages from topic: {e}")
 
     # ============ PROFILE OPERATIONS ============
 
@@ -1659,6 +1796,8 @@ class TgBot:
                 result["is_verified"] = getattr(entity, 'verified', False)
                 result["is_scam"] = getattr(entity, 'scam', False)
                 result["is_fake"] = getattr(entity, 'fake', False)
+                # Check if supergroup has forum mode enabled (topics)
+                result["is_forum"] = getattr(entity, 'forum', False) if not entity.broadcast else False
 
                 # Get full channel info for description and member count
                 try:
@@ -1668,10 +1807,12 @@ class TgBot:
                     # Check if channel has linked discussion group (comments enabled)
                     linked_chat_id = getattr(full_channel.full_chat, 'linked_chat_id', None)
                     result["comments_enabled"] = linked_chat_id is not None
+                    result["discussion_group_id"] = linked_chat_id
                 except Exception as e:
                     log.warning(f"Could not get full channel info: {e}")
                     result["member_count"] = getattr(entity, 'participants_count', None)
                     result["comments_enabled"] = None  # Unknown
+                    result["discussion_group_id"] = None
 
                 # Get recent posts for broadcast channels
                 if entity.broadcast:

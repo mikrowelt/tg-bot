@@ -24,9 +24,11 @@ from .commands import (
     change_profile,
     check_all_bans,
     check_ban,
+    get_chat_info,
     get_profile,
     health_check,
     join_channel,
+    print_chat_info,
     profile_health_check,
     send_message,
 )
@@ -177,6 +179,31 @@ def create_parser() -> argparse.ArgumentParser:
         "--no-test-message",
         action="store_true",
         help="Skip test messages (only check membership, not write access)",
+    )
+
+    # chat-info command
+    chat_info_parser = subparsers.add_parser(
+        "chat-info",
+        help="Get information about a chat/channel/group (including forum topics)",
+    )
+    chat_info_parser.add_argument(
+        "target",
+        help="Chat target (@username, channel ID, or link)",
+    )
+    chat_info_parser.add_argument(
+        "--topics", "-t",
+        action="store_true",
+        help="Include forum topics (for forum-enabled supergroups)",
+    )
+    chat_info_parser.add_argument(
+        "--posts",
+        action="store_true",
+        help="Include recent posts/messages",
+    )
+    chat_info_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON instead of formatted text",
     )
 
     # worker command (dispatcher)
@@ -349,6 +376,22 @@ def main() -> None:
         # Exit 0 if no bans, 1 if any bans or error
         if result:
             sys.exit(1 if result.get("banned_count", 0) > 0 else 0)
+        sys.exit(1)
+
+    elif args.command == "chat-info":
+        import json as json_lib
+        result = get_chat_info(
+            target=args.target,
+            profile=args.profile,
+            include_topics=args.topics,
+            include_posts=args.posts,
+        )
+        if result:
+            if args.json:
+                print(json_lib.dumps(result, indent=2, default=str))
+            else:
+                print_chat_info(result)
+            sys.exit(0)
         sys.exit(1)
 
     elif args.command == "worker":

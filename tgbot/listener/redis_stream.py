@@ -29,6 +29,11 @@ class ChannelMessage:
     reply_to_msg_id: int | None  # For comments, the post being commented on
     discussion_group_id: int | None  # If this is a comment in a discussion group
     listener_id: str | None = None  # ID of the listener that received this
+    # Forum/topic support for supergroups with forum mode
+    topic_id: int | None = None  # Forum topic ID (reply_to_top_id in Telethon)
+    is_forum_topic: bool = False  # True if message is in a forum topic
+    # Chat type for message routing
+    chat_type: str | None = None  # "channel", "supergroup", "group"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -126,6 +131,10 @@ class MessageStream:
                     "reply_to_msg_id": int(data["reply_to_msg_id"]) if data.get("reply_to_msg_id") else None,
                     "discussion_group_id": int(data["discussion_group_id"]) if data.get("discussion_group_id") else None,
                     "listener_id": data.get("listener_id") or None,
+                    # Forum/topic support
+                    "topic_id": int(data["topic_id"]) if data.get("topic_id") and data["topic_id"] != "None" else None,
+                    "is_forum_topic": data.get("is_forum_topic", "").lower() == "true",
+                    "chat_type": data.get("chat_type") or None,
                 }
                 messages.append(parsed)
             return messages

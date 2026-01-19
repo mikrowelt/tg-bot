@@ -306,13 +306,15 @@ class TestTgBotSendComment:
     """Tests for TgBot.send_comment() method."""
 
     async def test_send_comment_success(self, mock_config, mock_telegram_client):
-        """Test successful comment send."""
+        """Test successful comment send on broadcast channel."""
         mock_msg = MagicMock()
         mock_msg.id = 888
         mock_telegram_client.send_message = AsyncMock(return_value=mock_msg)
 
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
+        # Mock get_target_type to return "channel" (broadcast channel)
+        bot.get_target_type = AsyncMock(return_value="channel")
 
         with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_comment("channel", post_id=100, text="Nice post!")
@@ -341,6 +343,8 @@ class TestTgBotSendComment:
 
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
+        # Mock get_target_type to return "channel" (broadcast channel)
+        bot.get_target_type = AsyncMock(return_value="channel")
 
         with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
             with patch("tgbot.client.GetFullChannelRequest") as mock_request:
@@ -357,18 +361,36 @@ class TestTgBotSendComment:
 
     async def test_send_comment_banned(self, mock_config, mock_telegram_client):
         """Test comment when banned."""
+        # Mock get_entity to return a channel entity (for GetFullChannelRequest path)
+        mock_channel = MagicMock()
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_channel)
         mock_telegram_client.send_message = AsyncMock(
             side_effect=ChatWriteForbiddenError(request=None)
         )
 
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
+        # Mock get_target_type to return "channel" (broadcast channel)
+        bot.get_target_type = AsyncMock(return_value="channel")
 
         with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_comment("channel", post_id=100, text="Test")
 
         assert result.ok is False
         assert result.error == "banned"
+        assert result.retryable is False
+
+    async def test_send_comment_fails_on_supergroup(self, mock_config, mock_telegram_client):
+        """Test that send_comment fails on supergroups (not broadcast channels)."""
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+        # Mock get_target_type to return "supergroup" (not a broadcast channel)
+        bot.get_target_type = AsyncMock(return_value="supergroup")
+
+        result = await bot.send_comment("supergroup", post_id=100, text="Test")
+
+        assert result.ok is False
+        assert "supergroup" in result.error
         assert result.retryable is False
 
 
