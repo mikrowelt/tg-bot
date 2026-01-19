@@ -142,17 +142,18 @@ class Listener:
             print(f"[{self.listener_id}] >>> Received message from chat_id={chat_id}")
 
             # Filter by assigned groups if specified
-            # NOTE: Filtering is temporarily disabled to capture all messages
-            # including from discussion groups. The discussion_group_id is not
-            # always populated in the channels table.
-            # TODO: Re-enable filtering once discussion_group_id is properly tracked
-            # if self._assigned_groups:
-            #     # Extract supergroup ID from -100XXXXXXXXXX format
-            #     raw_id = abs(chat_id) if chat_id else 0
-            #     supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
-            #
-            #     if supergroup_id not in self._assigned_groups:
-            #         return  # Message from unmonitored group
+            if self._assigned_groups:
+                # Check both the raw chat_id and the ID without -100 prefix
+                # Telegram uses -100XXXXXXXXXX format for channels/supergroups
+                raw_id = abs(chat_id) if chat_id else 0
+
+                # Check if chat_id matches directly (handles negative IDs)
+                # or if the raw ID matches (handles positive IDs passed in --groups)
+                if chat_id not in self._assigned_groups and raw_id not in self._assigned_groups:
+                    # Also try extracting the actual ID (last 10 digits)
+                    supergroup_id = raw_id % 10000000000 if raw_id > 10000000000 else raw_id
+                    if supergroup_id not in self._assigned_groups:
+                        return  # Message from unmonitored group
 
             # Skip messages without text
             if not message.text:
