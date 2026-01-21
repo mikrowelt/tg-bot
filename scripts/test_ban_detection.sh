@@ -19,7 +19,7 @@
 set -e
 
 # Configuration
-API_URL="${API_URL:-https://tg-stage.duckdns.org/api}"
+API_URL="${API_URL:-https://stage.kingssa.org/api}"
 API_USER="${API_USER:-admin}"
 API_PASS="${API_PASS:-admin123}"
 
@@ -60,7 +60,7 @@ if [ $# -lt 2 ]; then
     echo "  $0 5 @my_test_channel"
     echo ""
     echo "Environment variables:"
-    echo "  API_URL  - API base URL (default: https://tg-stage.duckdns.org/api)"
+    echo "  API_URL  - API base URL (default: https://stage.kingssa.org/api)"
     echo "  API_USER - API username (default: admin)"
     echo "  API_PASS - API password (default: admin123)"
     exit 1
