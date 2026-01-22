@@ -294,8 +294,10 @@ class Listener:
         def signal_handler():
             logger.info(f"[{self.listener_id}] Received shutdown signal")
             self._shutdown_event.set()
+            # Schedule async disconnect on the event loop
+            # This ensures proper SQLite session cleanup (avoids "database is locked")
             if self._bot and self._bot._client:
-                self._bot._client.disconnect()
+                loop.create_task(self._async_disconnect())
 
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -305,6 +307,14 @@ class Listener:
                 pass
 
         await self.run()
+
+    async def _async_disconnect(self):
+        """Helper to properly disconnect the client asynchronously."""
+        try:
+            if self._bot and self._bot._client:
+                await self._bot._client.disconnect()
+        except Exception as e:
+            logger.debug(f"[{self.listener_id}] Disconnect during signal: {e}")
 
     @property
     def stats(self) -> dict:
