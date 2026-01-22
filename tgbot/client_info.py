@@ -492,7 +492,11 @@ class InfoMixin:
             full_channel = await self.client(GetFullChannelRequest(entity))
             available_reactions = full_channel.full_chat.available_reactions
 
-            if isinstance(available_reactions, ChatReactionsNone):
+            # Handle Python None (not Telegram type) - reactions are disabled
+            if available_reactions is None:
+                log.info(f"Channel {channel}: reactions not configured (disabled)")
+                return []
+            elif isinstance(available_reactions, ChatReactionsNone):
                 log.info(f"Channel {channel}: no reactions allowed")
                 return []
             elif isinstance(available_reactions, ChatReactionsAll):

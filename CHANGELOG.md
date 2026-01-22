@@ -5,6 +5,7 @@ All notable changes to tg-bot are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Reaction check for disabled channels** - `get_available_reactions()` now correctly returns `[]` when `available_reactions` is Python `None`, preventing "Invalid reaction provided" errors on channels with reactions disabled
 - **Listener signal handler** now properly awaits async disconnect to prevent "database is locked" SQLite errors
 
 ### Added
