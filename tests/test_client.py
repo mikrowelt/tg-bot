@@ -153,7 +153,7 @@ class TestTgBotHealthCheck:
 
         assert result["ok"] is False
         assert result["connected"] is False
-        assert result["error"] == "Client not connected"
+        assert result["error"] == "Not connected to Telegram"
 
     async def test_health_check_not_authorized(self, mock_config, mock_telegram_client):
         """Test health check when not authorized."""
@@ -165,7 +165,7 @@ class TestTgBotHealthCheck:
 
         assert result["ok"] is False
         assert result["authorized"] is False
-        assert result["error"] == "User not authorized"
+        assert result["error"] == "Not authorized"
 
     async def test_health_check_restricted_account(self, mock_config, mock_telegram_client):
         """Test health check with restricted account."""
@@ -180,7 +180,7 @@ class TestTgBotHealthCheck:
 
         assert result["ok"] is False
         assert result["restricted"] is True
-        assert result["error"] == "Account is restricted"
+        assert result["error"] == "Account is restricted: spam"
 
 
 class TestTgBotSendMessage:
@@ -195,7 +195,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello world")
 
         assert result.ok is True
@@ -211,7 +211,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Reply text", reply_to=500)
 
         assert result.ok is True
@@ -228,7 +228,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello")
 
         assert result.ok is False
@@ -244,7 +244,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello")
 
         assert result.ok is False
@@ -260,7 +260,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello")
 
         assert result.ok is False
@@ -276,7 +276,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello")
 
         assert result.ok is False
@@ -293,7 +293,7 @@ class TestTgBotSendMessage:
         bot = TgBot(mock_config)
         bot._client = mock_telegram_client
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_message("testchat", "Hello")
 
         assert result.ok is False
@@ -316,7 +316,7 @@ class TestTgBotSendComment:
         # Mock get_target_type to return "channel" (broadcast channel)
         bot.get_target_type = AsyncMock(return_value="channel")
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_comment("channel", post_id=100, text="Nice post!")
 
         assert result.ok is True
@@ -346,8 +346,8 @@ class TestTgBotSendComment:
         # Mock get_target_type to return "channel" (broadcast channel)
         bot.get_target_type = AsyncMock(return_value="channel")
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
-            with patch("tgbot.client.GetFullChannelRequest") as mock_request:
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
+            with patch("tgbot.client_messages.GetFullChannelRequest") as mock_request:
                 mock_telegram_client.__call__ = AsyncMock(return_value=mock_full_chat)
                 result = await bot.send_comment(
                     "channel", post_id=100, text="Reply!", reply_to=555
@@ -373,7 +373,7 @@ class TestTgBotSendComment:
         # Mock get_target_type to return "channel" (broadcast channel)
         bot.get_target_type = AsyncMock(return_value="channel")
 
-        with patch("tgbot.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("tgbot.client_messages.asyncio.sleep", new_callable=AsyncMock):
             result = await bot.send_comment("channel", post_id=100, text="Test")
 
         assert result.ok is False
@@ -470,3 +470,94 @@ class TestTgBotGetTargetType:
 
         with pytest.raises(TgBotError, match="Failed to get target type"):
             await bot.get_target_type("invalid")
+
+
+class TestTgBotGetAvailableReactions:
+    """Tests for TgBot.get_available_reactions() method."""
+
+    async def test_get_available_reactions_none(self, mock_config, mock_telegram_client):
+        """Test when channel has no reactions allowed (ChatReactionsNone)."""
+        from telethon.tl.types import Channel, ChatReactionsNone
+
+        mock_entity = MagicMock(spec=Channel)
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_entity)
+
+        # Mock GetFullChannelRequest response - configure the callable return value
+        mock_full_chat = MagicMock()
+        mock_full_chat.full_chat.available_reactions = ChatReactionsNone()
+        mock_telegram_client.return_value = mock_full_chat
+
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+
+        result = await bot.get_available_reactions("testchannel")
+        assert result == []
+
+    async def test_get_available_reactions_all(self, mock_config, mock_telegram_client):
+        """Test when channel allows all reactions (ChatReactionsAll)."""
+        from telethon.tl.types import Channel, ChatReactionsAll
+
+        mock_entity = MagicMock(spec=Channel)
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_entity)
+
+        # Mock GetFullChannelRequest response
+        mock_full_chat = MagicMock()
+        mock_full_chat.full_chat.available_reactions = ChatReactionsAll()
+        mock_telegram_client.return_value = mock_full_chat
+
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+
+        result = await bot.get_available_reactions("testchannel")
+        assert result is None
+
+    async def test_get_available_reactions_some(self, mock_config, mock_telegram_client):
+        """Test when channel has specific reactions allowed (ChatReactionsSome)."""
+        from telethon.tl.types import Channel, ChatReactionsSome, ReactionEmoji
+
+        mock_entity = MagicMock(spec=Channel)
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_entity)
+
+        # Mock GetFullChannelRequest response with specific reactions
+        mock_full_chat = MagicMock()
+        mock_reactions = ChatReactionsSome(reactions=[
+            ReactionEmoji(emoticon="👍"),
+            ReactionEmoji(emoticon="❤️"),
+            ReactionEmoji(emoticon="🔥"),
+        ])
+        mock_full_chat.full_chat.available_reactions = mock_reactions
+        mock_telegram_client.return_value = mock_full_chat
+
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+
+        result = await bot.get_available_reactions("testchannel")
+        assert result == ["👍", "❤️", "🔥"]
+
+    async def test_get_available_reactions_error(self, mock_config, mock_telegram_client):
+        """Test error handling when getting reactions fails."""
+        mock_telegram_client.get_entity = AsyncMock(side_effect=Exception("Not found"))
+
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+
+        with pytest.raises(TgBotError, match="Failed to get available reactions"):
+            await bot.get_available_reactions("invalid")
+
+    async def test_get_available_reactions_with_channel_id(self, mock_config, mock_telegram_client):
+        """Test getting reactions using channel ID instead of username."""
+        from telethon.tl.types import Channel, ChatReactionsAll
+
+        mock_entity = MagicMock(spec=Channel)
+        mock_telegram_client.get_entity = AsyncMock(return_value=mock_entity)
+
+        mock_full_chat = MagicMock()
+        mock_full_chat.full_chat.available_reactions = ChatReactionsAll()
+        mock_telegram_client.return_value = mock_full_chat
+
+        bot = TgBot(mock_config)
+        bot._client = mock_telegram_client
+
+        result = await bot.get_available_reactions(-1001234567890)
+        assert result is None
+        mock_telegram_client.get_entity.assert_called_once_with(-1001234567890)

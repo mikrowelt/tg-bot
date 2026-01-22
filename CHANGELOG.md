@@ -8,6 +8,9 @@ All notable changes to tg-bot are documented in this file.
 - **Listener signal handler** now properly awaits async disconnect to prevent "database is locked" SQLite errors
 
 ### Added
+- **`get_available_reactions(channel)`** method in `InfoMixin` to query which reactions are allowed on a channel/group
+  - Returns `None` for all reactions allowed, `[]` for no reactions, or list of specific emoji strings
+  - Prevents "Invalid reaction provided" errors during warmup tasks
 - **Dev branch deployment support** for CI/CD pipeline
 - **Centralized constants module** (`tgbot/utils/constants.py`) for all magic numbers and timeouts
 - **Retry utilities** (`tgbot/utils/retry.py`) with exponential backoff and `RetryContext`
