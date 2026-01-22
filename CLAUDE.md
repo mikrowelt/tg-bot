@@ -5,18 +5,24 @@
 ## Development Workflow (MANDATORY)
 
 ```
-REQUIREMENTS → TESTS → IMPLEMENT → VERIFY → CHANGELOG
+REQUIREMENTS → TESTS → IMPLEMENT → VERIFY → E2E → CHANGELOG → DOCS
 ```
 
 1. **Requirements First** — Update `docs/requirements/` before any code change
 2. **TDD** — Write failing tests in `tests/` BEFORE implementation
 3. **Implement** — Write minimal code to make tests pass
 4. **Verify** — Run `pytest -x --tb=short`
-5. **Changelog** — Update `CHANGELOG.md`
+5. **E2E on Dev** — Deploy to dev, verify feature works. **Task NOT done until E2E passes**
+6. **Changelog** — Update `CHANGELOG.md`
+7. **Update Docs** — Add class/function/property names to docs for ast-grep
 
-## First Steps
+## First Steps: Read Docs → ast-grep → Code
 
-**Before making changes:** Read `docs/` and understand the CLI commands and client mixins.
+1. **Read `docs/`** — Understand CLI commands, client mixins, find class/function names
+2. **Use ast-grep** — Search for those names in code (see patterns below)
+3. **Analyze code** — Read with context from documentation
+
+**Never search code blindly — read docs first to know what to search for.**
 
 ## ast-grep Patterns
 
