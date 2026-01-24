@@ -5,6 +5,11 @@ All notable changes to tg-bot are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Smart username extraction from Telegram links** - Added `extract_telegram_username()` utility function
+  - Handles all link formats: `https://t.me/username`, `@username`, `t.me/username`, plain `username`
+  - Strips protocols, prefixes, trailing slashes, query params, and hash fragments
+  - Fixes "username is unacceptable" errors when channels stored with full URLs or @ prefix
+  - Applied to `join_channel`, `_get_channel_id`, and `leave_channel` in `client_channels.py`
 - **Reaction check for disabled channels** - `get_available_reactions()` now correctly returns `[]` when `available_reactions` is Python `None`, preventing "Invalid reaction provided" errors on channels with reactions disabled
 - **Listener signal handler** now properly awaits async disconnect to prevent "database is locked" SQLite errors
 
