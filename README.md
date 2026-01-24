@@ -185,3 +185,7 @@ tg-bot/
 ## License
 
 MIT
+
+---
+
+For full changelog, see [CHANGELOG.md](./CHANGELOG.md).

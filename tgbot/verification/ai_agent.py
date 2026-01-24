@@ -56,10 +56,15 @@ class CachedAction:
 
 
 class VerificationCache:
-    """Cache for verification patterns and solutions."""
+    """
+    Thread-safe cache for verification patterns and solutions.
+
+    Uses an asyncio.Lock to protect concurrent access to the cache dictionary.
+    """
 
     def __init__(self):
         self._cache: dict[str, CachedAction] = {}
+        self._lock = asyncio.Lock()
 
     def _normalize_text(self, text: str, our_username: str | None, our_first_name: str | None) -> str:
         """Normalize message text by replacing dynamic parts with placeholders."""
@@ -121,7 +126,7 @@ class VerificationCache:
         fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
         return hashlib.sha256(fingerprint_str.encode()).hexdigest()[:16]
 
-    def get(
+    async def get(
         self,
         bot_username: str,
         message_text: str,
@@ -129,19 +134,20 @@ class VerificationCache:
         our_username: str | None = None,
         our_first_name: str | None = None,
     ) -> CachedAction | None:
-        """Get cached action for a verification pattern."""
+        """Get cached action for a verification pattern (thread-safe)."""
         fingerprint = self._create_fingerprint(
             bot_username, message_text, button_texts, our_username, our_first_name
         )
 
-        cached = self._cache.get(fingerprint)
-        if cached and cached.success_rate >= 0.5:  # Only use if success rate is acceptable
-            log.debug(f"Cache hit for fingerprint {fingerprint} (success rate: {cached.success_rate:.0%})")
-            return cached
+        async with self._lock:
+            cached = self._cache.get(fingerprint)
+            if cached and cached.success_rate >= 0.5:  # Only use if success rate is acceptable
+                log.debug(f"Cache hit for fingerprint {fingerprint} (success rate: {cached.success_rate:.0%})")
+                return cached
 
         return None
 
-    def set(
+    async def set(
         self,
         bot_username: str,
         message_text: str,
@@ -150,15 +156,16 @@ class VerificationCache:
         our_username: str | None = None,
         our_first_name: str | None = None,
     ) -> None:
-        """Cache an action for a verification pattern."""
+        """Cache an action for a verification pattern (thread-safe)."""
         fingerprint = self._create_fingerprint(
             bot_username, message_text, button_texts, our_username, our_first_name
         )
 
-        self._cache[fingerprint] = action
+        async with self._lock:
+            self._cache[fingerprint] = action
         log.debug(f"Cached action for fingerprint {fingerprint}: {action.action_type}")
 
-    def record_result(
+    async def record_result(
         self,
         bot_username: str,
         message_text: str,
@@ -167,40 +174,43 @@ class VerificationCache:
         our_username: str | None = None,
         our_first_name: str | None = None,
     ) -> None:
-        """Record success/failure for a cached pattern."""
+        """Record success/failure for a cached pattern (thread-safe)."""
         fingerprint = self._create_fingerprint(
             bot_username, message_text, button_texts, our_username, our_first_name
         )
 
-        if fingerprint in self._cache:
-            if success:
-                self._cache[fingerprint].success_count += 1
-            else:
-                self._cache[fingerprint].fail_count += 1
-            self._cache[fingerprint].last_used = datetime.utcnow()
+        async with self._lock:
+            if fingerprint in self._cache:
+                if success:
+                    self._cache[fingerprint].success_count += 1
+                else:
+                    self._cache[fingerprint].fail_count += 1
+                self._cache[fingerprint].last_used = datetime.utcnow()
 
-    def export(self) -> dict:
-        """Export cache for persistence."""
-        return {
-            fp: {
-                "action_type": action.action_type,
-                "action_data": action.action_data,
-                "success_count": action.success_count,
-                "fail_count": action.fail_count,
+    async def export(self) -> dict:
+        """Export cache for persistence (thread-safe)."""
+        async with self._lock:
+            return {
+                fp: {
+                    "action_type": action.action_type,
+                    "action_data": action.action_data,
+                    "success_count": action.success_count,
+                    "fail_count": action.fail_count,
+                }
+                for fp, action in self._cache.items()
             }
-            for fp, action in self._cache.items()
-        }
 
-    def load(self, data: dict) -> None:
-        """Load cache from persisted data."""
-        for fp, action_data in data.items():
-            self._cache[fp] = CachedAction(
-                action_type=action_data["action_type"],
-                action_data=action_data["action_data"],
-                success_count=action_data.get("success_count", 0),
-                fail_count=action_data.get("fail_count", 0),
-            )
-        log.info(f"Loaded {len(self._cache)} cached verification patterns")
+    async def load(self, data: dict) -> None:
+        """Load cache from persisted data (thread-safe)."""
+        async with self._lock:
+            for fp, action_data in data.items():
+                self._cache[fp] = CachedAction(
+                    action_type=action_data["action_type"],
+                    action_data=action_data["action_data"],
+                    success_count=action_data.get("success_count", 0),
+                    fail_count=action_data.get("fail_count", 0),
+                )
+            log.info(f"Loaded {len(self._cache)} cached verification patterns")
 
 
 # Global cache instance
@@ -634,7 +644,7 @@ Respond with JSON only."""
             button_texts = [b["text"] for b in buttons]
 
             # Check cache first
-            cached_action = self.cache.get(
+            cached_action = await self.cache.get(
                 bot_username or "unknown",
                 verification_message.text or "",
                 button_texts,
@@ -656,7 +666,7 @@ Respond with JSON only."""
                 )
 
                 # Record result
-                self.cache.record_result(
+                await self.cache.record_result(
                     bot_username or "unknown",
                     verification_message.text or "",
                     button_texts,
@@ -699,7 +709,7 @@ Respond with JSON only."""
             success = await self._execute_action(action, verification_message)
 
             # Cache the action
-            self.cache.set(
+            await self.cache.set(
                 bot_username or "unknown",
                 verification_message.text or "",
                 button_texts,
@@ -846,7 +856,7 @@ Respond with JSON only."""
                 button_texts = [b["text"] for b in buttons]
 
                 # Check cache
-                cached_action = self.cache.get(
+                cached_action = await self.cache.get(
                     bot_username,
                     message.text or "",
                     button_texts,
@@ -888,7 +898,7 @@ Respond with JSON only."""
                 success = await self._execute_action(action, message)
 
                 # Cache the action
-                self.cache.set(
+                await self.cache.set(
                     bot_username,
                     message.text or "",
                     button_texts,
@@ -948,7 +958,7 @@ Respond with JSON only."""
         button_texts = [b["text"] for b in buttons]
 
         # Check cache
-        cached_action = self.cache.get(
+        cached_action = await self.cache.get(
             bot.username or "unknown",
             message.text or "",
             button_texts,
@@ -989,7 +999,7 @@ Respond with JSON only."""
         success = await self._execute_action(action, message)
 
         # Cache
-        self.cache.set(
+        await self.cache.set(
             bot.username or "unknown",
             message.text or "",
             button_texts,

@@ -2,6 +2,34 @@
 
 > Inherits workflow from [../CLAUDE.md](../CLAUDE.md)
 
+---
+
+## For Agents: Read This First
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  YOU ARE AN AGENT WORKING ON tg-bot                                         │
+│                                                                             │
+│  MANDATORY WORKFLOW:                                                        │
+│  1. Read this CLAUDE.md completely                                          │
+│  2. Read docs/requirements/ for existing specs                              │
+│  3. UPDATE docs/requirements/ with YOUR implementation specs                │
+│  4. Write tests FIRST in tests/ (TDD)                                       │
+│  5. Implement minimal code to pass tests                                    │
+│  6. Run: pytest -x --tb=short                                               │
+│  7. UPDATE docs/ with classes/functions/commands you created                │
+│  8. UPDATE CHANGELOG.md                                                     │
+│                                                                             │
+│  LOCAL DOCS LOCATIONS:                                                      │
+│  - Requirements: docs/requirements/*.md                                     │
+│  - Architecture: docs/architecture/*.md                                     │
+│  - Decisions: docs/decisions/*.md                                           │
+│  - Changelog: CHANGELOG.md                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Development Workflow (MANDATORY)
 
 ```
