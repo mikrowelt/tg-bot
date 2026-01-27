@@ -4,62 +4,70 @@
 
 Real-time Telegram group message monitoring with Redis stream publishing for downstream processing.
 
-## Architecture
+> **Important:** As of January 2026, message listening is handled by **tg-session's internal listener**, not the standalone `tg-bot listen` command. This prevents session conflicts and account destruction.
+
+## Architecture (Current - tg-session)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Telegram Groups                           │
-│                                                              │
-│  Group 1 (-1001234567890)  Group 2 (-1009999999999)         │
-└───────────────────────────────┬─────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Telegram Groups                               │
+│                                                                  │
+│  Group 1 (-1001234567890)  Group 2 (-1009999999999)             │
+└───────────────────────────────┬─────────────────────────────────┘
                                 │ Telethon Events
                                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Listener (tg-bot listen)                   │
-│                                                              │
-│  - Filters by assigned groups                               │
-│  - Extracts message metadata                                │
-│  - Handles forum topics                                      │
-│  - Emits heartbeats                                         │
-└───────────────────────────────┬─────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                   tg-session (Port 8200)                         │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              ListenerManager (internal)                   │   │
+│  │                                                          │   │
+│  │  - Manages listener lifecycle via API                    │   │
+│  │  - Shares connection pool with operations                │   │
+│  │  - Pause/resume for command execution                    │   │
+│  │  - NO session conflicts (single owner)                   │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└───────────────────────────────┬─────────────────────────────────┘
                                 │
                                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Redis                                │
-│                                                              │
-│  Stream: tg:listener:messages (max 1M messages)             │
-│  Key: tg:listener:heartbeat:{listener_id} (TTL 30s)         │
-└───────────────────────────────┬─────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Redis                                    │
+│                                                                  │
+│  Stream: tg:listener:messages (max 1M messages)                 │
+│  Key: tg:listener:heartbeat:{listener_id} (TTL 30s)             │
+└───────────────────────────────┬─────────────────────────────────┘
                                 │
                                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Consumers (tg-master)                     │
-│                                                              │
-│  XREAD GROUP analyzers consumer-1                           │
-│  Process messages, update analytics, trigger responses      │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Consumers (tg-master)                         │
+│                                                                  │
+│  XREAD GROUP analyzers consumer-1                               │
+│  Process messages, update analytics, trigger responses          │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Configuration
+## Starting Listeners (via tg-session API)
 
-```bash
-tg-bot listen \
-  --groups -1001234567890,-1009999999999 \
-  --listener-id my-listener-1 \
-  --account-id 42 \
-  --redis redis://localhost:6379 \
-  --heartbeat-interval 10 \
-  --debug
+```python
+# tg-master starts listener via tg-session
+async with httpx.AsyncClient() as client:
+    response = await client.post(
+        f"{TG_SESSION_URL}/accounts/{account_id}/listen/start",
+        json={
+            "groups": [-1001234567890, -1009999999999],
+            "listener_id": "listener-1"
+        }
+    )
 ```
 
-| Option | Required | Default | Description |
-|--------|----------|---------|-------------|
-| `--groups` | Yes | - | Comma-separated group IDs |
-| `--listener-id` | No | Auto-generated | Unique listener identifier |
-| `--account-id` | No | - | Database account ID |
-| `--redis` | No | `redis://localhost:6379` | Redis URL |
-| `--heartbeat-interval` | No | 10 | Heartbeat frequency (seconds) |
-| `--debug` | No | False | Print messages to stdout |
+### API Endpoints (tg-session)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/accounts/{id}/listen/start` | Start listener for account |
+| POST | `/accounts/{id}/listen/stop` | Stop listener |
+| PUT | `/accounts/{id}/listen/groups` | Update monitored groups |
+| GET | `/listeners` | List all active listeners |
 
 ## Message Format
 
@@ -124,15 +132,6 @@ if assigned_groups:
         return  # Skip this group
 ```
 
-### Example
-
-```bash
-# These all match group 1234567890:
---groups -1001234567890
---groups 1234567890
---groups -1001234567890,1234567890  # Both formats work
-```
-
 ## Heartbeat System
 
 ### Purpose
@@ -143,7 +142,7 @@ if assigned_groups:
 ### Mechanism
 
 ```python
-# Every heartbeat_interval seconds:
+# tg-session emits heartbeat every 10 seconds:
 redis.setex(
     f"tg:listener:heartbeat:{listener_id}",
     30,  # TTL
@@ -176,23 +175,10 @@ if not heartbeat:
 | Consumer group | `analyzers` |
 | Trim strategy | `MAXLEN ~` (approximate) |
 
-### Publishing
+### Consuming (tg-master)
 
 ```python
-async def publish(message: ChannelMessage) -> str:
-    message_id = await redis.xadd(
-        "tg:listener:messages",
-        message.to_dict(),
-        maxlen=1_000_000,
-        approximate=True
-    )
-    return message_id
-```
-
-### Consuming
-
-```python
-# Consumer group read (tg-master side)
+# Consumer group read
 messages = await redis.xreadgroup(
     "analyzers",
     "consumer-1",
@@ -234,58 +220,34 @@ Forum messages include:
 | Message processing error | Log and continue |
 | FloodWait | Log and wait |
 
-## Signal Handling
+---
 
-```python
-# Graceful shutdown on SIGINT/SIGTERM
-async def run_with_signal_handling():
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: stop())
+## Legacy: tg-bot listen Command (DEPRECATED)
 
-    await start()
-    await run_forever()
+> **Warning:** The standalone `tg-bot listen` command is **DEPRECATED** as of January 2026. Using it directly risks session destruction due to concurrent access conflicts.
+
+The command still exists for backwards compatibility but should not be used:
+
+```bash
+# DEPRECATED - Do not use directly
+tg-bot listen \
+  --groups -1001234567890,-1009999999999 \
+  --listener-id my-listener-1 \
+  --account-id 42 \
+  --redis redis://localhost:6379
 ```
 
-## Debug Mode
+**Why deprecated:**
+- Running `tg-bot listen` while tg-session manages the same account causes `AuthKeyDuplicatedError`
+- Session files are permanently destroyed
+- No recovery possible - must create new Telegram account
 
-With `--debug`:
-- Prints each message to stdout
-- Format: `[{channel_id}] @{sender}: {text[:50]}...`
-- Useful for testing without Redis consumers
+**Migration:**
+All listener management now goes through tg-session API. See [tg-session documentation](../../../tg-session/docs/INDEX.md).
 
-## Integration with tg-master
+---
 
-### Starting Listener
+## See Also
 
-```python
-# tg-master spawns listener subprocess
-subprocess.Popen([
-    "tg-bot", "listen",
-    "--groups", ",".join(map(str, group_ids)),
-    "--listener-id", listener_id,
-    "--account-id", str(account_id),
-    "--redis", redis_url,
-    "--heartbeat-interval", "10"
-])
-```
-
-### Monitoring Health
-
-```python
-# Check all listeners
-for listener_id in known_listeners:
-    heartbeat = redis.get(f"tg:listener:heartbeat:{listener_id}")
-    if not heartbeat:
-        handle_dead_listener(listener_id)
-```
-
-### Consuming Messages
-
-```python
-# Message processing loop
-while True:
-    messages = await redis.xreadgroup(...)
-    for msg in messages:
-        await process_and_respond(msg)
-```
+- [tg-session Documentation](../../../tg-session/docs/INDEX.md) - Session gateway with internal listener
+- [Worker Dispatcher](worker-dispatcher.md) - Task queue processing
